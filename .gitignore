@@ -1,0 +1,32 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# AMReX simulation data
+Results/
+results/
+plt*/
+chk*/
+
+# Generated output
+output/
+post_output/
+
+# Large CFD files
+*.dat
+*.plt
+*.vtk
+*.vtu
+*.h5
+
+# Logs
+*.log

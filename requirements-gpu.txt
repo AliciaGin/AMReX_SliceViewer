@@ -1,0 +1,2 @@
+# Optional NVIDIA GPU acceleration for Windows + CUDA 12.x drivers.
+cupy-cuda12x[ctk]>=14.2.0
