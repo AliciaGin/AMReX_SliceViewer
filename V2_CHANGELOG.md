@@ -1,19 +1,42 @@
-# AMREXVIEWERv2 变更说明
+# AMReX_SlideViewer V2 Changelog
 
-## 核心变化
+## Core Changes
 
-1. 任务调度以时间步为单位。一个任务读取一个时间步的多个层级和多个变量，变量不再拆成独立进程。
-2. Tecplot ASCII 的结构化 BLOCK Zone 先读取 Zone 数值区，再用一次 `numpy.fromstring` 转换为 `float32` 数组。
-3. 变量切片仍按照 Zone 中的 `VARLOCATION` 和 `I/J/K` 尺寸计算，不采用固定的节点变量数量。
-4. 每张图不再主动执行一次全量 `gc.collect()`，改为时间步结束后回收，减少批量出图时的额外开销。
-5. 保留二进制缓存、缓存失效检测、GPU 数组批处理、断点续作和 CPU 回退。
+### 1. Time-step based task scheduling
 
-## 并行规则
+- Task scheduling is now organized by simulation time step.
+- One task processes:
+  - multiple AMR levels
+  - multiple physical variables
 
-- CPU 模式：按时间步使用多个进程，进程数受数据维度、磁盘和内存限制。
-- GPU 模式：单 GPU 进程持有 CUDA 上下文；缓存为空时先用最多两个 CPU 进程并行准备 ASCII 缓存。
-- 同一时间步的多个变量在一个任务中批量读取和处理。
+Variables are no longer separated into independent processes, reducing repeated file access and improving memory efficiency.
 
-## 兼容策略
+---
 
-v2 优先处理结构化 Tecplot BLOCK 数据。遇到 POINT 或无法识别的 Zone 时回退到 v1 的逐块解析路径。
+### 2. Optimized Tecplot ASCII BLOCK Zone parsing
+
+- Structured Tecplot ASCII BLOCK Zones are now processed using a two-stage workflow:
+  1. Read the numerical region of each Zone.
+  2. Convert the data into `float32` arrays using a single `numpy.fromstring` operation.
+
+This significantly improves parsing efficiency for large structured datasets.
+
+---
+
+### 3. Adaptive variable slicing
+
+Variable slicing is determined dynamically based on:
+
+- Zone `VARLOCATION`
+- Zone `I/J/K` dimensions
+
+The implementation no longer assumes a fixed number of node variables, improving compatibility with different Tecplot datasets.
+
+---
+
+### 4. Improved garbage collection strategy
+
+Previous versions performed a full:
+
+```python
+gc.collect()
