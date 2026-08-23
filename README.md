@@ -1,5 +1,9 @@
 # AMReX_SliceViewer
 
+<p align="center">
+  <strong>English</strong> | <a href="README.zh-CN.md">简体中文</a>
+</p>
+
 AMReX_SliceViewer is a Python desktop application and command-line tool for
 visualizing AMReX adaptive mesh refinement (AMR) simulation data.
 
@@ -143,7 +147,7 @@ For automation, set `AMREX_VIEWER_LANG` to `auto`, `en`, or `zh_CN`.
 ## Quick Start: GUI
 
 <p align="center">
-  <img src="docs/media/gui-home.png" alt="AMReX SliceViewer main interface" width="1100">
+  <img src="docs/media/gui-home-en.png" alt="AMReX SliceViewer English main interface" width="1100">
 </p>
 
 <p align="center"><em>Main interface with hardware detection, dataset controls, rendering settings, and image/video output.</em></p>
@@ -303,7 +307,8 @@ For a visual project page, a useful media set is:
 | File | Purpose |
 | --- | --- |
 | `docs/media/workflow.svg` | Always-present overview of the processing pipeline |
-| `docs/media/gui-home.png` | Screenshot of the desktop application |
+| `docs/media/gui-home-en.png` | English desktop application screenshot |
+| `docs/media/gui-home-zh.png` | Simplified Chinese desktop application screenshot |
 | `docs/media/rhograd.gif` | Inline animation visible in most Markdown viewers |
 | `docs/media/rhograd.mp4` | Higher-quality animation for browsers and downloads |
 
