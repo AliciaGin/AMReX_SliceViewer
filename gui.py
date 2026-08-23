@@ -21,13 +21,31 @@ from amr_backend import (
 from hardware_info import collect_hardware_info, format_hardware_summary
 from gpu_backend import create_backend
 from runtime_policy import estimate_data_scale, format_data_scale, recommend_workers
+from i18n import (
+    get_language,
+    get_language_preference,
+    save_language_preference,
+    set_language,
+    tr,
+)
+from platform_support import (
+    available_plot_fonts,
+    configure_high_dpi,
+    configure_tk_fonts,
+    default_plot_font,
+    open_in_file_manager,
+)
 from visualizer import COLORMAPS, PlotConfig, generate_all
 
 
 class AMRVisualizerApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("amrex_Viewer v2 - AMR 后处理")
+        self.language_preference = get_language_preference()
+        self.language = set_language(self.language_preference)
+        self._ = tr
+        self.ui_font_family = configure_tk_fonts(self.root, self.language)
+        self.root.title(f"amrex_Viewer v2 - {self._('AMR post-processing')}")
         self.root.geometry("1320x820")
         self._base_width = 1320
         self._base_height = 820
@@ -60,15 +78,15 @@ class AMRVisualizerApp:
         style.configure("Section.TLabelframe", background="#ffffff", padding=8)
         style.configure(
             "Section.TLabelframe.Label",
-            font=("Microsoft YaHei UI", 9, "bold"),
+            font=(self.ui_font_family, 9, "bold"),
             foreground="#1f2937",
             background="#eef2f7",
         )
         style.configure("TLabel", background="#eef2f7", foreground="#334155")
         style.configure("Section.TLabel", background="#ffffff", foreground="#334155")
         style.configure("Hint.TLabel", background="#ffffff", foreground="#64748b")
-        style.configure("Title.TLabel", font=("Microsoft YaHei UI", 15, "bold"), foreground="#0f172a")
-        style.configure("Subtitle.TLabel", font=("Microsoft YaHei UI", 9), foreground="#64748b")
+        style.configure("Title.TLabel", font=(self.ui_font_family, 15, "bold"), foreground="#0f172a")
+        style.configure("Subtitle.TLabel", font=(self.ui_font_family, 9), foreground="#64748b")
         style.configure("TButton", padding=(8, 4))
         style.configure("Accent.TButton", padding=(12, 5))
         style.configure("TCheckbutton", background="#ffffff", foreground="#334155")
@@ -83,7 +101,7 @@ class AMRVisualizerApp:
                 continue
             if size:
                 self._font_sizes[name] = size
-        self.root.bind("<Configure>", self._schedule_font_resize, add="+")
+        self.root.bind("<Configure>", self._schedule_font_resize)
 
     def _schedule_font_resize(self, event):
         if event.widget is not self.root:
@@ -132,15 +150,43 @@ class AMRVisualizerApp:
         self.main.bind("<Configure>", self._main_panel_changed)
         self.scroll_canvas.bind("<Configure>", self._center_main_panel)
         self.scroll_canvas.bind_all("<MouseWheel>", self._on_mousewheel, add="+")
+        self.scroll_canvas.bind_all("<Button-4>", self._on_mousewheel, add="+")
+        self.scroll_canvas.bind_all("<Button-5>", self._on_mousewheel, add="+")
 
         header = ttk.Frame(self.main)
         header.pack(fill="x", pady=(0, 8))
-        ttk.Label(header, text="amrex_Viewer v2", style="Title.TLabel").pack(anchor="w")
+        header.columnconfigure(0, weight=1)
+        title_box = ttk.Frame(header)
+        title_box.grid(row=0, column=0, sticky="w")
+        ttk.Label(title_box, text="amrex_Viewer v2", style="Title.TLabel").pack(anchor="w")
         ttk.Label(
-            header,
-            text="批量生成二维云图、三维切片、论文图片和视频结果",
+            title_box,
+            text=self._("Generate 2D fields, 3D slices, publication figures, and animations"),
             style="Subtitle.TLabel",
         ).pack(anchor="w", pady=(1, 0))
+        language_box = ttk.Frame(header)
+        language_box.grid(row=0, column=1, sticky="ne")
+        ttk.Label(language_box, text=self._("Language:")).pack(side="left", padx=(0, 5))
+        self.language_choices = {
+            self._("System default"): "auto",
+            self._("English"): "en",
+            self._("Simplified Chinese"): "zh_CN",
+        }
+        selected_language = next(
+            label
+            for label, code in self.language_choices.items()
+            if code == self.language_preference
+        )
+        self.language_var = tk.StringVar(value=selected_language)
+        self.language_combo = ttk.Combobox(
+            language_box,
+            textvariable=self.language_var,
+            values=list(self.language_choices),
+            width=16,
+            state="readonly",
+        )
+        self.language_combo.pack(side="left")
+        self.language_combo.bind("<<ComboboxSelected>>", self._language_changed)
 
         self._section_parent = self.main
         self._build_hardware_section()
@@ -179,8 +225,53 @@ class AMRVisualizerApp:
         )
 
     def _on_mousewheel(self, event):
-        if event.delta:
+        if getattr(event, "num", None) == 4:
+            self.scroll_canvas.yview_scroll(-1, "units")
+        elif getattr(event, "num", None) == 5:
+            self.scroll_canvas.yview_scroll(1, "units")
+        elif event.delta:
             self.scroll_canvas.yview_scroll(int(-event.delta / 120), "units")
+
+    def _language_changed(self, _event=None):
+        preference = self.language_choices.get(self.language_var.get(), "auto")
+        if preference == self.language_preference:
+            return
+        if self._run_active:
+            messagebox.showwarning(
+                self._("A task is running"),
+                self._("Language cannot be changed while a task is running."),
+            )
+            current = next(
+                label
+                for label, code in self.language_choices.items()
+                if code == self.language_preference
+            )
+            self.language_var.set(current)
+            return
+
+        folder = self.folder_var.get() if hasattr(self, "folder_var") else ""
+        output_dir = self.output_dir_var.get() if hasattr(self, "output_dir_var") else ""
+        had_dataset = self.metadata is not None
+        self.language_preference = preference
+        self.language = set_language(preference)
+        try:
+            save_language_preference(preference)
+        except OSError:
+            pass
+
+        self.root.unbind_all("<MouseWheel>")
+        self.root.unbind_all("<Button-4>")
+        self.root.unbind_all("<Button-5>")
+        for child in self.root.winfo_children():
+            child.destroy()
+        if hasattr(self, "spatial_range_entries"):
+            del self.spatial_range_entries
+        self.__init__(self.root)
+        if had_dataset and folder:
+            self.folder_var.set(folder)
+            self._load_folder(folder)
+            if output_dir:
+                self.output_dir_var.set(output_dir)
 
     def _toggle_fullscreen(self, _event=None):
         self._fullscreen = not self._fullscreen
@@ -196,8 +287,8 @@ class AMRVisualizerApp:
     def _on_close(self):
         if self._run_active:
             should_close = messagebox.askyesno(
-                "任务正在运行",
-                "当前仍在生成图片或视频。关闭窗口将结束 GUI，未完成任务不会保证继续运行。\n\n确认关闭吗？",
+                self._("A task is running"),
+                self._("Image or video generation is still running. Closing the window will stop the GUI and unfinished work may be lost.\n\nClose anyway?"),
             )
             if not should_close:
                 return
@@ -219,7 +310,7 @@ class AMRVisualizerApp:
         return frame
 
     def _build_source_section(self):
-        section = self._section("1. 数据源")
+        section = self._section(self._("1. Data source"))
         row = ttk.Frame(section)
         row.pack(fill="x")
         self.folder_var = tk.StringVar()
@@ -228,31 +319,31 @@ class AMRVisualizerApp:
             side="left", fill="x", expand=True
         )
         self.folder_entry.bind("<Return>", lambda _: self._load_entered_folder())
-        ttk.Button(row, text="加载", command=self._load_entered_folder).pack(
+        ttk.Button(row, text=self._("Load"), command=self._load_entered_folder).pack(
             side="left", padx=(6, 0)
         )
-        ttk.Button(row, text="浏览...", command=self._select_folder).pack(
+        ttk.Button(row, text=self._("Browse..."), command=self._select_folder).pack(
             side="left", padx=(6, 0)
         )
         self.source_info = ttk.Label(
             section,
-            text="请选择 AMReX plotfile（plot_format=0）或 Tecplot ASCII（plot_format=1）数据目录",
+            text=self._("Select an AMReX plotfile (plot_format=0) or Tecplot ASCII (plot_format=1) directory"),
         )
         self.source_info.pack(anchor="w", pady=(6, 0))
 
     def _build_variable_section(self):
-        section = self._section("2. 绘图变量（可多选）")
+        section = self._section(self._("2. Variables (multiple selection)"))
         self.variable_frame = ttk.Frame(section)
         self.variable_frame.pack(fill="x")
-        ttk.Label(self.variable_frame, text="请先加载数据目录").pack(anchor="w")
+        ttk.Label(self.variable_frame, text=self._("Load a dataset first")).pack(anchor="w")
 
     def _build_dimension_section(self):
-        section = self._section("3. 数据维度与三维切片")
+        section = self._section(self._("3. Dimension and 3D slice"))
         row = ttk.Frame(section)
         row.pack(fill="x")
-        ttk.Label(row, text="维度:").pack(side="left")
+        ttk.Label(row, text=self._("Dimension:")).pack(side="left")
         self.dimension_var = tk.StringVar(value="auto")
-        for label, value in (("自动", "auto"), ("二维", "2"), ("三维", "3")):
+        for label, value in ((self._("Auto"), "auto"), (self._("2D"), "2"), (self._("3D"), "3")):
             ttk.Radiobutton(
                 row, text=label, value=value,
                 variable=self.dimension_var,
@@ -261,7 +352,7 @@ class AMRVisualizerApp:
 
         self.slice_frame = ttk.Frame(section)
         self.slice_frame.pack(fill="x", pady=(8, 0))
-        ttk.Label(self.slice_frame, text="切片法向:").pack(side="left")
+        ttk.Label(self.slice_frame, text=self._("Slice normal:")).pack(side="left")
         self.slice_axis_var = tk.StringVar(value="z")
         self.slice_axis_combo = ttk.Combobox(
             self.slice_frame,
@@ -272,24 +363,24 @@ class AMRVisualizerApp:
         )
         self.slice_axis_combo.pack(side="left", padx=5)
         self.slice_axis_combo.bind("<<ComboboxSelected>>", self._axis_changed)
-        ttk.Label(self.slice_frame, text="切片坐标:").pack(side="left", padx=(12, 0))
+        ttk.Label(self.slice_frame, text=self._("Slice position:")).pack(side="left", padx=(12, 0))
         self.slice_position_var = tk.StringVar()
         self.slice_position_entry = ttk.Entry(
             self.slice_frame, textvariable=self.slice_position_var, width=14
         )
         self.slice_position_entry.pack(side="left", padx=5)
-        self.slice_range_label = ttk.Label(self.slice_frame, text="范围: -")
+        self.slice_range_label = ttk.Label(self.slice_frame, text=self._("Range: -"))
         self.slice_range_label.pack(side="left", padx=10)
         self._update_slice_controls()
 
     def _build_spatial_range_section(self):
-        section = self._section("4. 空间输出范围（默认完整计算域）")
+        section = self._section(self._("4. Spatial output bounds (full domain by default)"))
         grid = ttk.Frame(section)
         grid.pack(fill="x")
-        ttk.Label(grid, text="方向").grid(row=0, column=0, padx=5, pady=3)
-        ttk.Label(grid, text="最小值").grid(row=0, column=1, padx=5, pady=3)
-        ttk.Label(grid, text="最大值").grid(row=0, column=2, padx=5, pady=3)
-        ttk.Label(grid, text="原始边界").grid(row=0, column=3, padx=10, pady=3)
+        ttk.Label(grid, text=self._("Axis")).grid(row=0, column=0, padx=5, pady=3)
+        ttk.Label(grid, text=self._("Minimum")).grid(row=0, column=1, padx=5, pady=3)
+        ttk.Label(grid, text=self._("Maximum")).grid(row=0, column=2, padx=5, pady=3)
+        ttk.Label(grid, text=self._("Domain bounds")).grid(row=0, column=3, padx=10, pady=3)
 
         self.spatial_range_vars = {}
         self.spatial_range_entries = {}
@@ -312,57 +403,57 @@ class AMRVisualizerApp:
 
         ttk.Button(
             grid,
-            text="恢复完整边界",
+            text=self._("Restore full bounds"),
             command=self._populate_spatial_ranges,
         ).grid(row=1, column=4, rowspan=3, padx=12, pady=3)
         ttk.Label(
             section,
-            text="三维切片时，法向范围用于约束切片坐标，平面内两个方向用于裁剪输出区域。",
+            text=self._("For 3D slices, the normal range constrains the slice position; the other two ranges crop the output plane."),
         ).pack(anchor="w", pady=(5, 0))
         self._update_spatial_range_controls()
 
     def _build_level_section(self):
-        section = self._section("5. AMR 层级（可多选，细层覆盖粗层）")
+        section = self._section(self._("5. AMR levels (fine levels cover coarse levels)"))
         self.level_frame = ttk.Frame(section)
         self.level_frame.pack(fill="x")
-        ttk.Label(self.level_frame, text="请先加载数据目录").pack(anchor="w")
+        ttk.Label(self.level_frame, text=self._("Load a dataset first")).pack(anchor="w")
 
     def _build_timestep_section(self):
-        section = self._section("6. 时间步范围与断点续作")
+        section = self._section(self._("6. Timesteps and resume"))
         grid = ttk.Frame(section)
         grid.pack(fill="x")
-        ttk.Label(grid, text="选择方式:").grid(row=0, column=0, sticky="w", pady=4)
-        self.timestep_mode_var = tk.StringVar(value="全部时间步")
+        ttk.Label(grid, text=self._("Selection:")).grid(row=0, column=0, sticky="w", pady=4)
+        self.timestep_mode_var = tk.StringVar(value=self._("All timesteps"))
         ttk.Combobox(
             grid,
             textvariable=self.timestep_mode_var,
-            values=["全部时间步", "按时间步范围", "前 N 个时间步"],
+            values=[self._("All timesteps"), self._("Timestep range"), self._("First N timesteps")],
             state="readonly",
             width=16,
         ).grid(row=0, column=1, sticky="w", padx=5, pady=4)
         self.timestep_mode_var.trace_add("write", lambda *_: self._update_timestep_controls())
 
-        ttk.Label(grid, text="起始步:").grid(row=1, column=0, sticky="w", pady=4)
+        ttk.Label(grid, text=self._("Start:")).grid(row=1, column=0, sticky="w", pady=4)
         self.timestep_start_var = tk.StringVar()
         self.timestep_start_entry = ttk.Entry(
             grid, textvariable=self.timestep_start_var, width=12
         )
         self.timestep_start_entry.grid(row=1, column=1, sticky="w", padx=5, pady=4)
 
-        ttk.Label(grid, text="结束步:").grid(row=1, column=2, sticky="w", padx=(16, 0), pady=4)
+        ttk.Label(grid, text=self._("End:")).grid(row=1, column=2, sticky="w", padx=(16, 0), pady=4)
         self.timestep_end_var = tk.StringVar()
         self.timestep_end_entry = ttk.Entry(
             grid, textvariable=self.timestep_end_var, width=12
         )
         self.timestep_end_entry.grid(row=1, column=3, sticky="w", padx=5, pady=4)
 
-        ttk.Label(grid, text="数量:").grid(row=2, column=0, sticky="w", pady=4)
+        ttk.Label(grid, text=self._("Count:")).grid(row=2, column=0, sticky="w", pady=4)
         self.timestep_count_var = tk.StringVar()
         self.timestep_count_entry = ttk.Entry(
             grid, textvariable=self.timestep_count_var, width=12
         )
         self.timestep_count_entry.grid(row=2, column=1, sticky="w", padx=5, pady=4)
-        self.timestep_hint_var = tk.StringVar(value="请先加载数据目录")
+        self.timestep_hint_var = tk.StringVar(value=self._("Load a dataset first"))
         ttk.Label(
             grid, textvariable=self.timestep_hint_var, justify="left"
         ).grid(row=2, column=2, columnspan=2, sticky="w", padx=(16, 0), pady=4)
@@ -370,7 +461,7 @@ class AMRVisualizerApp:
         self.resume_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             section,
-            text="断点续作：跳过已有有效结果（绘图参数不变时使用）",
+            text=self._("Resume: skip valid existing results when plot settings are unchanged"),
             variable=self.resume_var,
         ).pack(anchor="w", pady=(5, 0))
         self._update_timestep_controls()
@@ -379,65 +470,66 @@ class AMRVisualizerApp:
         if not hasattr(self, "timestep_mode_var"):
             return
         mode = self.timestep_mode_var.get()
-        range_state = "normal" if mode == "按时间步范围" else "disabled"
-        count_state = "normal" if mode == "前 N 个时间步" else "disabled"
+        range_state = "normal" if mode == self._("Timestep range") else "disabled"
+        count_state = "normal" if mode == self._("First N timesteps") else "disabled"
         self.timestep_start_entry.config(state=range_state)
         self.timestep_end_entry.config(state=range_state)
         self.timestep_count_entry.config(state=count_state)
 
     def _populate_timestep_controls(self):
         if not self.metadata or not self.metadata.timesteps:
-            self.timestep_mode_var.set("全部时间步")
+            self.timestep_mode_var.set(self._("All timesteps"))
             self.timestep_start_var.set("")
             self.timestep_end_var.set("")
             self.timestep_count_var.set("")
-            self.timestep_hint_var.set("请先加载数据目录")
+            self.timestep_hint_var.set(self._("Load a dataset first"))
             return
         steps = self.metadata.timesteps
-        self.timestep_mode_var.set("全部时间步")
+        self.timestep_mode_var.set(self._("All timesteps"))
         self.timestep_start_var.set(str(steps[0]))
         self.timestep_end_var.set(str(steps[-1]))
         self.timestep_count_var.set(str(len(steps)))
-        self.timestep_hint_var.set(
-            f"可用范围: {steps[0]} - {steps[-1]}，共 {len(steps)} 个时间步"
-        )
+        self.timestep_hint_var.set(self._(
+            "Available: {first} - {last}, {count} timesteps",
+            first=steps[0], last=steps[-1], count=len(steps),
+        ))
         self._update_timestep_controls()
 
     def _selected_timesteps(self):
         if not self.metadata or not self.metadata.timesteps:
-            raise ValueError("没有可用时间步")
+            raise ValueError(self._("No timesteps are available"))
         available = list(self.metadata.timesteps)
         mode = self.timestep_mode_var.get()
-        if mode == "全部时间步":
+        if mode == self._("All timesteps"):
             return available
-        if mode == "按时间步范围":
+        if mode == self._("Timestep range"):
             try:
                 start = int(self.timestep_start_var.get().strip())
                 end = int(self.timestep_end_var.get().strip())
             except ValueError as exc:
-                raise ValueError("起始步和结束步必须为整数") from exc
+                raise ValueError(self._("Start and end timesteps must be integers")) from exc
             if start > end:
-                raise ValueError("起始步不能大于结束步")
+                raise ValueError(self._("The start timestep cannot be greater than the end timestep"))
             selected = [step for step in available if start <= step <= end]
             if not selected:
-                raise ValueError("指定范围内没有可用时间步")
+                raise ValueError(self._("No available timesteps are inside the requested range"))
             return selected
         try:
             count = int(self.timestep_count_var.get().strip())
         except ValueError as exc:
-            raise ValueError("时间步数量必须为正整数") from exc
+            raise ValueError(self._("The timestep count must be a positive integer")) from exc
         if count <= 0:
-            raise ValueError("时间步数量必须为正整数")
+            raise ValueError(self._("The timestep count must be a positive integer"))
         return available[:count]
 
     def _build_hardware_section(self):
-        section = self._section("硬件与数据规模")
+        section = self._section(self._("Hardware and data scale"))
         self.array_backend = create_backend(prefer_gpu=True)
         self.gpu_enabled_var = tk.BooleanVar(
             value=self.array_backend.status.is_gpu
         )
         self.hardware_summary_var = tk.StringVar(
-            value=format_hardware_summary(self.hardware_info)
+            value=format_hardware_summary(self.hardware_info, language=self.language)
         )
         ttk.Label(
             section,
@@ -445,7 +537,7 @@ class AMRVisualizerApp:
             justify="left",
             anchor="w",
         ).pack(fill="x")
-        self.data_scale_var = tk.StringVar(value="Data: load a dataset to estimate scale")
+        self.data_scale_var = tk.StringVar(value=self._("Data: load a dataset to estimate scale"))
         ttk.Label(
             section,
             textvariable=self.data_scale_var,
@@ -453,7 +545,7 @@ class AMRVisualizerApp:
             anchor="w",
         ).pack(fill="x", pady=(5, 0))
         self.worker_hint_var = tk.StringVar(
-            value="Automatic workers: load a dataset to calculate"
+            value=self._("Automatic workers: load a dataset to calculate")
         )
         ttk.Label(
             section,
@@ -463,9 +555,9 @@ class AMRVisualizerApp:
         ).pack(fill="x", pady=(5, 0))
         self.gpu_status_var = tk.StringVar(
             value=(
-                f"GPU数组后端：{self.array_backend.status.device}"
+                self._("GPU array backend: {device}", device=self.array_backend.status.device)
                 if self.array_backend.status.is_gpu
-                else f"GPU数组后端：CPU回退（{self.array_backend.status.reason}）"
+                else self._("GPU array backend: CPU fallback ({reason})", reason=self.array_backend.status.reason)
             )
         )
         ttk.Label(
@@ -476,37 +568,37 @@ class AMRVisualizerApp:
         ).pack(fill="x", pady=(5, 0))
         ttk.Checkbutton(
             section,
-            text="启用 GPU 数组加速（CuPy）",
+            text=self._("Enable GPU array acceleration (CuPy)"),
             variable=self.gpu_enabled_var,
             command=self._update_worker_hint,
         ).pack(anchor="w", pady=(5, 0))
         self.ascii_cache_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             section,
-            text="启用 Tecplot ASCII 二进制缓存（首次运行转换）",
+            text=self._("Enable Tecplot ASCII binary cache (converted on first use)"),
             variable=self.ascii_cache_var,
         ).pack(anchor="w", pady=(5, 0))
         ttk.Button(
             section,
-            text="刷新硬件信息",
+            text=self._("Refresh hardware information"),
             command=self._refresh_hardware,
         ).pack(anchor="w", pady=(6, 0))
 
     def _refresh_hardware(self):
         path = normalize_input_path(self.folder_var.get()) if hasattr(self, "folder_var") else ""
         self.hardware_info = collect_hardware_info(path)
-        self.hardware_summary_var.set(format_hardware_summary(self.hardware_info))
+        self.hardware_summary_var.set(format_hardware_summary(self.hardware_info, language=self.language))
         if self.metadata:
             self.data_scale = estimate_data_scale(
                 self.metadata,
                 storage_kind=self.hardware_info.storage_kind,
             )
-            self.data_scale_var.set(format_data_scale(self.data_scale))
+            self.data_scale_var.set(format_data_scale(self.data_scale, language=self.language))
         self._update_worker_hint()
 
     def _update_worker_hint(self):
         if not self.data_scale:
-            self.worker_hint_var.set("Automatic workers: load a dataset to calculate")
+            self.worker_hint_var.set(self._("Automatic workers: load a dataset to calculate"))
             if hasattr(self, "worker_spinbox"):
                 use_gpu = self.gpu_enabled_var.get()
                 self.worker_spinbox.configure(state="disabled" if use_gpu else "normal")
@@ -519,171 +611,173 @@ class AMRVisualizerApp:
             use_gpu=use_gpu,
         )
         if use_gpu:
-            text = "GPU模式：1个进程（变量批量上传；避免重复占用显存）"
+            text = self._("GPU mode: 1 process (variables are uploaded in batches to avoid duplicated GPU memory)")
         else:
-            text = f"CPU模式：自动使用 {workers} 个进程（按时间步并行）"
+            text = self._("CPU mode: automatically use {workers} processes (parallel by timestep)", workers=workers)
         self.worker_hint_var.set(text)
         if hasattr(self, "worker_spinbox"):
             self.worker_spinbox.configure(state="disabled" if use_gpu else "normal")
 
     def _build_plot_section(self):
-        section = self._section("7. 绘图设置")
+        section = self._section(self._("7. Plot settings"))
         grid = ttk.Frame(section)
         grid.pack(fill="x")
-        for column in range(4):
-            grid.columnconfigure(column, weight=1 if column in (1, 3) else 0)
+        grid.columnconfigure(1, weight=1)
 
-        ttk.Label(grid, text="出图预设:").grid(row=0, column=0, sticky="w", pady=4)
-        self.preset_var = tk.StringVar(value="自定义")
+        ttk.Label(grid, text=self._("Preset:")).grid(row=0, column=0, sticky="w", pady=4)
+        self.preset_var = tk.StringVar(value=self._("Custom"))
         preset_combo = ttk.Combobox(
             grid,
             textvariable=self.preset_var,
-            values=["自定义", "快速预览", "论文图片", "视频输出", "Schlieren/梯度图"],
+            values=[self._("Custom"), self._("Quick preview"), self._("Publication figure"), self._("Video output"), self._("Schlieren / gradient")],
             width=15,
             state="readonly",
         )
         preset_combo.grid(row=0, column=1, sticky="w", padx=5, pady=4)
         preset_combo.bind("<<ComboboxSelected>>", self._apply_preset)
 
-        ttk.Label(grid, text="绘图模式:").grid(row=0, column=2, sticky="w", padx=(20, 0), pady=4)
-        self.plot_mode_var = tk.StringVar(value="云图")
+        ttk.Label(grid, text=self._("Plot mode:")).grid(row=1, column=0, sticky="w", pady=4)
+        self.plot_mode_var = tk.StringVar(value=self._("Filled contour"))
         ttk.Combobox(
             grid,
             textvariable=self.plot_mode_var,
-            values=["云图", "等值线", "云图 + 等值线"],
+            values=[self._("Filled contour"), self._("Contour lines"), self._("Filled contour + lines")],
             width=14,
             state="readonly",
-        ).grid(row=0, column=3, sticky="w", padx=5, pady=4)
+        ).grid(row=1, column=1, sticky="w", padx=5, pady=4)
 
-        ttk.Label(grid, text="色标:").grid(row=1, column=0, sticky="w", pady=4)
+        ttk.Label(grid, text=self._("Colormap:")).grid(row=2, column=0, sticky="w", pady=4)
         self.cmap_var = tk.StringVar(value="redblue")
         ttk.Combobox(
             grid, textvariable=self.cmap_var,
             values=COLORMAPS, width=18, state="readonly",
-        ).grid(row=1, column=1, sticky="w", padx=5, pady=4)
+        ).grid(row=2, column=1, sticky="w", padx=5, pady=4)
 
-        ttk.Label(grid, text="色标尺度:").grid(row=1, column=2, sticky="w", padx=(20, 0), pady=4)
+        ttk.Label(grid, text=self._("Color scale:")).grid(row=3, column=0, sticky="w", pady=4)
         self.norm_var = tk.StringVar(value="linear")
         ttk.Combobox(
             grid, textvariable=self.norm_var,
             values=["linear", "log"], width=10, state="readonly",
-        ).grid(row=1, column=3, sticky="w", padx=5, pady=4)
+        ).grid(row=3, column=1, sticky="w", padx=5, pady=4)
 
-        ttk.Label(grid, text="DPI:").grid(row=2, column=0, sticky="w", pady=4)
+        ttk.Label(grid, text="DPI:").grid(row=4, column=0, sticky="w", pady=4)
         self.dpi_var = tk.IntVar(value=600)
         ttk.Spinbox(
             grid, textvariable=self.dpi_var,
             from_=72, to=600, width=8,
-        ).grid(row=2, column=1, sticky="w", padx=5, pady=4)
+        ).grid(row=4, column=1, sticky="w", padx=5, pady=4)
 
-        ttk.Label(grid, text="等值线数量:").grid(row=2, column=2, sticky="w", padx=(20, 0), pady=4)
+        ttk.Label(grid, text=self._("Contour levels:")).grid(row=5, column=0, sticky="w", pady=4)
         self.contour_levels_var = tk.IntVar(value=20)
         ttk.Spinbox(
             grid, textvariable=self.contour_levels_var,
             from_=5, to=100, width=8,
-        ).grid(row=2, column=3, sticky="w", padx=5, pady=4)
+        ).grid(row=5, column=1, sticky="w", padx=5, pady=4)
 
-        ttk.Label(grid, text="字体:").grid(row=3, column=0, sticky="w", pady=4)
-        self.font_family_var = tk.StringVar(value="Times New Roman")
+        ttk.Label(grid, text=self._("Font:")).grid(row=6, column=0, sticky="w", pady=4)
+        plot_fonts = available_plot_fonts(self.language)
+        self.font_family_var = tk.StringVar(value=default_plot_font(self.language))
         ttk.Combobox(
             grid,
             textvariable=self.font_family_var,
-            values=["Times New Roman", "Microsoft YaHei", "SimHei", "Arial", "sans-serif", "serif"],
+            values=plot_fonts,
             width=18,
-        ).grid(row=3, column=1, sticky="w", padx=5, pady=4)
+        ).grid(row=6, column=1, sticky="w", padx=5, pady=4)
 
-        ttk.Label(grid, text="字号:").grid(row=3, column=2, sticky="w", padx=(20, 0), pady=4)
+        ttk.Label(grid, text=self._("Font size:")).grid(row=7, column=0, sticky="w", pady=4)
         self.font_size_var = tk.IntVar(value=12)
         ttk.Spinbox(
             grid, textvariable=self.font_size_var,
             from_=8, to=32, width=8,
-        ).grid(row=3, column=3, sticky="w", padx=5, pady=4)
+        ).grid(row=7, column=1, sticky="w", padx=5, pady=4)
 
-        ttk.Label(grid, text="线宽:").grid(row=4, column=0, sticky="w", pady=4)
+        ttk.Label(grid, text=self._("Line width:")).grid(row=8, column=0, sticky="w", pady=4)
         self.contour_linewidth_var = tk.DoubleVar(value=0.5)
         ttk.Spinbox(
             grid, textvariable=self.contour_linewidth_var,
             from_=0.1, to=5.0, increment=0.1, width=8,
-        ).grid(row=4, column=1, sticky="w", padx=5, pady=4)
+        ).grid(row=8, column=1, sticky="w", padx=5, pady=4)
 
-        ttk.Label(grid, text="线颜色:").grid(row=4, column=2, sticky="w", padx=(20, 0), pady=4)
+        ttk.Label(grid, text=self._("Line color:")).grid(row=9, column=0, sticky="w", pady=4)
         self.contour_color_var = tk.StringVar(value="black")
         ttk.Entry(grid, textvariable=self.contour_color_var, width=14).grid(
-            row=4, column=3, sticky="w", padx=5, pady=4
+            row=9, column=1, sticky="w", padx=5, pady=4
         )
 
-        ttk.Label(grid, text="图片宽高:").grid(row=5, column=0, sticky="w", pady=4)
+        ttk.Label(grid, text=self._("Figure size:")).grid(row=10, column=0, sticky="w", pady=4)
         size_box = ttk.Frame(grid)
-        size_box.grid(row=5, column=1, sticky="w", padx=5, pady=4)
+        size_box.grid(row=10, column=1, sticky="w", padx=5, pady=4)
         self.fig_width_var = tk.DoubleVar(value=12.0)
         self.fig_height_var = tk.DoubleVar(value=6.0)
         ttk.Spinbox(size_box, textvariable=self.fig_width_var, from_=3.0, to=30.0, increment=0.5, width=6).pack(side="left")
         ttk.Label(size_box, text=" x ").pack(side="left")
         ttk.Spinbox(size_box, textvariable=self.fig_height_var, from_=3.0, to=30.0, increment=0.5, width=6).pack(side="left")
 
-        ttk.Label(grid, text="进程数（CPU模式）:").grid(row=5, column=2, sticky="w", padx=(20, 0), pady=4)
+        ttk.Label(grid, text=self._("Processes (CPU mode):")).grid(row=11, column=0, sticky="w", pady=4)
         self.workers_var = tk.IntVar(value=0)
         self.worker_spinbox = ttk.Spinbox(
             grid, textvariable=self.workers_var,
             from_=0, to=max(1, os.cpu_count() or 1), width=8,
         )
-        self.worker_spinbox.grid(row=5, column=3, sticky="w", padx=5, pady=4)
+        self.worker_spinbox.grid(row=11, column=1, sticky="w", padx=5, pady=4)
         self._update_worker_hint()
 
         self.auto_range_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
-            grid, text="颜色范围自动",
+            grid, text=self._("Automatic color range"),
             variable=self.auto_range_var,
             command=self._toggle_range,
-        ).grid(row=6, column=0, sticky="w", pady=4)
+        ).grid(row=12, column=0, sticky="w", pady=4)
         self.vmin_var = tk.StringVar()
         self.vmax_var = tk.StringVar()
-        self.vmin_entry = ttk.Entry(grid, textvariable=self.vmin_var, width=10)
-        self.vmax_entry = ttk.Entry(grid, textvariable=self.vmax_var, width=10)
-        self.vmin_entry.grid(row=6, column=1, sticky="w", padx=5, pady=4)
-        self.vmax_entry.grid(row=6, column=2, sticky="w", padx=5, pady=4)
+        range_box = ttk.Frame(grid)
+        range_box.grid(row=12, column=1, sticky="w", padx=5, pady=4)
+        self.vmin_entry = ttk.Entry(range_box, textvariable=self.vmin_var, width=10)
+        self.vmax_entry = ttk.Entry(range_box, textvariable=self.vmax_var, width=10)
+        self.vmin_entry.pack(side="left")
+        self.vmax_entry.pack(side="left", padx=(6, 0))
         self._toggle_range()
 
         self.symmetric_range_var = tk.BooleanVar(value=False)
         self.global_range_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
-            grid, text="正负对称色标", variable=self.symmetric_range_var
-        ).grid(row=6, column=3, sticky="w", pady=4)
+            grid, text=self._("Symmetric color range"), variable=self.symmetric_range_var
+        ).grid(row=13, column=0, columnspan=2, sticky="w", pady=4)
         ttk.Checkbutton(
-            grid, text="全部时间步统一色标", variable=self.global_range_var
-        ).grid(row=7, column=0, columnspan=2, sticky="w", pady=4)
+            grid, text=self._("Global color range across all timesteps"), variable=self.global_range_var
+        ).grid(row=14, column=0, columnspan=2, sticky="w", pady=4)
 
         self.colorbar_var = tk.BooleanVar(value=True)
         self.frame_var = tk.BooleanVar(value=True)
         self.title_var = tk.BooleanVar(value=True)
         self.patch_edges_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
-            grid, text="显示颜色条", variable=self.colorbar_var
-        ).grid(row=7, column=2, sticky="w", pady=4)
+            grid, text=self._("Show colorbar"), variable=self.colorbar_var
+        ).grid(row=15, column=0, columnspan=2, sticky="w", pady=4)
         ttk.Checkbutton(
-            grid, text="显示坐标框", variable=self.frame_var
-        ).grid(row=7, column=3, sticky="w", pady=4)
+            grid, text=self._("Show axes frame"), variable=self.frame_var
+        ).grid(row=16, column=0, columnspan=2, sticky="w", pady=4)
         ttk.Checkbutton(
-            grid, text="显示顶部字段", variable=self.title_var
-        ).grid(row=8, column=0, sticky="w", pady=4)
+            grid, text=self._("Show title field"), variable=self.title_var
+        ).grid(row=17, column=0, columnspan=2, sticky="w", pady=4)
         ttk.Checkbutton(
-            grid, text="显示 AMR patch 边界", variable=self.patch_edges_var
-        ).grid(row=8, column=1, columnspan=2, sticky="w", pady=4)
+            grid, text=self._("Show AMR patch boundaries"), variable=self.patch_edges_var
+        ).grid(row=18, column=0, columnspan=2, sticky="w", pady=4)
 
-        ttk.Label(grid, text="X轴标签:").grid(row=9, column=0, sticky="w", pady=4)
+        ttk.Label(grid, text=self._("X-axis label:")).grid(row=19, column=0, sticky="w", pady=4)
         self.x_label_var = tk.StringVar()
         ttk.Entry(grid, textvariable=self.x_label_var, width=16).grid(
-            row=9, column=1, sticky="w", padx=5, pady=4
+            row=19, column=1, sticky="w", padx=5, pady=4
         )
-        ttk.Label(grid, text="Y轴标签:").grid(row=9, column=2, sticky="w", padx=(20, 0), pady=4)
+        ttk.Label(grid, text=self._("Y-axis label:")).grid(row=20, column=0, sticky="w", pady=4)
         self.y_label_var = tk.StringVar()
         ttk.Entry(grid, textvariable=self.y_label_var, width=16).grid(
-            row=9, column=3, sticky="w", padx=5, pady=4
+            row=20, column=1, sticky="w", padx=5, pady=4
         )
 
     def _apply_preset(self, _event=None):
         preset = self.preset_var.get()
-        if preset == "快速预览":
+        if preset == self._("Quick preview"):
             self.dpi_var.set(100)
             self.fig_width_var.set(8.0)
             self.fig_height_var.set(4.5)
@@ -693,7 +787,7 @@ class AMRVisualizerApp:
             self.cmap_var.set("turbo")
             self.image_format_var.set("png")
             self.global_range_var.set(False)
-        elif preset == "论文图片":
+        elif preset == self._("Publication figure"):
             self.dpi_var.set(300)
             self.fig_width_var.set(7.0)
             self.fig_height_var.set(4.2)
@@ -704,7 +798,7 @@ class AMRVisualizerApp:
             self.image_format_var.set("png")
             self.colorbar_var.set(True)
             self.frame_var.set(True)
-        elif preset == "视频输出":
+        elif preset == self._("Video output"):
             self.dpi_var.set(150)
             self.fig_width_var.set(9.0)
             self.fig_height_var.set(5.0)
@@ -718,7 +812,7 @@ class AMRVisualizerApp:
             self.video_gif_var.set(False)
             self.global_range_var.set(True)
             self.frame_var.set(False)
-        elif preset == "Schlieren/梯度图":
+        elif preset == self._("Schlieren / gradient"):
             self.dpi_var.set(300)
             self.fig_width_var.set(8.0)
             self.fig_height_var.set(4.0)
@@ -730,20 +824,20 @@ class AMRVisualizerApp:
             self.norm_var.set("linear")
 
     def _build_output_section(self):
-        section = self._section("8. 输出")
+        section = self._section(self._("8. Output"))
         type_row = ttk.Frame(section)
         type_row.pack(fill="x")
         self.output_type_var = tk.StringVar(value="image")
         ttk.Radiobutton(
-            type_row, text="图片", value="image",
+            type_row, text=self._("Image"), value="image",
             variable=self.output_type_var,
         ).pack(side="left", padx=5)
         ttk.Radiobutton(
-            type_row, text="视频", value="video",
+            type_row, text=self._("Video"), value="video",
             variable=self.output_type_var,
         ).pack(side="left", padx=5)
 
-        ttk.Label(type_row, text="图片格式:").pack(side="left", padx=(20, 4))
+        ttk.Label(type_row, text=self._("Image format:")).pack(side="left", padx=(20, 4))
         self.image_format_var = tk.StringVar(value="png")
         ttk.Combobox(
             type_row,
@@ -752,7 +846,7 @@ class AMRVisualizerApp:
             width=8,
             state="readonly",
         ).pack(side="left")
-        ttk.Label(type_row, text="视频帧率:").pack(side="left", padx=(20, 4))
+        ttk.Label(type_row, text=self._("Video FPS:")).pack(side="left", padx=(20, 4))
         self.fps_var = tk.IntVar(value=10)
         ttk.Spinbox(
             type_row, textvariable=self.fps_var,
@@ -761,7 +855,7 @@ class AMRVisualizerApp:
 
         video_row = ttk.Frame(section)
         video_row.pack(fill="x", pady=(8, 0))
-        ttk.Label(video_row, text="视频格式:").pack(side="left", padx=(5, 4))
+        ttk.Label(video_row, text=self._("Video format:")).pack(side="left", padx=(5, 4))
         self.video_mp4_var = tk.BooleanVar(value=True)
         self.video_gif_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
@@ -778,39 +872,39 @@ class AMRVisualizerApp:
             side="left", fill="x", expand=True
         )
         ttk.Button(
-            path_row, text="选择输出目录...",
+            path_row, text=self._("Select output directory..."),
             command=self._select_output_dir,
         ).pack(side="left", padx=(6, 0))
         self.open_output_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
-            section, text="完成后打开输出目录", variable=self.open_output_var
+            section, text=self._("Open output directory when finished"), variable=self.open_output_var
         ).pack(anchor="w", pady=(8, 0))
 
     def _build_action_section(self, parent=None):
         if parent is None:
-            section = self._section("9. 执行")
+            section = self._section(self._("9. Run"))
         else:
-            section = ttk.LabelFrame(parent, text="9. 执行", padding=8)
+            section = ttk.LabelFrame(parent, text=self._("9. Run"), padding=8)
             section.pack(fill="x")
         row = ttk.Frame(section)
         row.pack(fill="x")
-        self.run_button = ttk.Button(row, text="开始生成", command=self._run)
+        self.run_button = ttk.Button(row, text=self._("Start"), command=self._run)
         self.run_button.pack(side="left")
         self.progress_var = tk.DoubleVar(value=0)
         ttk.Progressbar(
             row, variable=self.progress_var,
             maximum=100, mode="determinate",
         ).pack(side="left", fill="x", expand=True, padx=12)
-        self.status_label = ttk.Label(row, text="就绪", width=12)
+        self.status_label = ttk.Label(row, text=self._("Ready"), width=12)
         self.status_label.pack(side="left")
-        self.elapsed_label = ttk.Label(row, text="用时 00:00", width=14)
+        self.elapsed_label = ttk.Label(row, text=self._("Elapsed {duration}", duration="00:00"), width=14)
         self.elapsed_label.pack(side="left", padx=(10, 0))
 
     def _select_folder(self):
         current = normalize_input_path(self.folder_var.get())
         initial_dir = current if current and os.path.isdir(current) else str(Path.home())
         folder = filedialog.askdirectory(
-            title="选择具体计算结果目录（例如 Results-3Dformat0）",
+            title=self._("Select a specific result directory (for example Results-3Dformat0)"),
             initialdir=initial_dir,
         )
         if not folder:
@@ -821,7 +915,7 @@ class AMRVisualizerApp:
     def _load_entered_folder(self):
         folder = normalize_input_path(self.folder_var.get())
         if not folder:
-            messagebox.showwarning("路径为空", "请输入或选择计算结果目录")
+            messagebox.showwarning(self._("Empty path"), self._("Enter or select a result directory"))
             return
         self.folder_var.set(folder)
         self._load_folder(folder)
@@ -829,27 +923,25 @@ class AMRVisualizerApp:
     def _load_folder(self, folder):
         folder = normalize_input_path(folder)
         self.folder_var.set(folder)
-        self.source_info.config(text="正在扫描...")
+        self.source_info.config(text=self._("Scanning..."))
         self.root.update_idletasks()
         try:
             self.metadata = scan_dataset(folder)
         except (DatasetError, UnsupportedFormatError) as exc:
             self.metadata = None
             self._clear_dataset_controls()
-            self.source_info.config(text="扫描失败")
-            messagebox.showerror("数据读取错误", str(exc))
+            self.source_info.config(text=self._("Scan failed"))
+            messagebox.showerror(self._("Dataset error"), str(exc))
             return
 
         meta = self.metadata
         if meta.source_format == "tecplot_binary":
             self.metadata = None
             self._clear_dataset_controls()
-            self.source_info.config(text="已识别 Tecplot Binary，但当前版本不读取该格式")
+            self.source_info.config(text=self._("Tecplot Binary detected, but this version cannot read it"))
             messagebox.showerror(
-                "数据格式不支持",
-                "数据路径可以正常访问，但其中是 plot_format=2 的 Tecplot TDV112 二进制文件。\n"
-                "当前软件仅支持 plot_format=0 的 AMReX Plotfile 和 "
-                "plot_format=1 的 Tecplot ASCII。",
+                self._("Unsupported data format"),
+                self._("The directory is accessible but contains plot_format=2 Tecplot TDV112 binary data.\nThis application supports plot_format=0 AMReX plotfiles and plot_format=1 Tecplot ASCII."),
             )
             return
 
@@ -858,15 +950,18 @@ class AMRVisualizerApp:
             meta,
             storage_kind=self.hardware_info.storage_kind,
         )
-        self.hardware_summary_var.set(format_hardware_summary(self.hardware_info))
-        self.data_scale_var.set(format_data_scale(self.data_scale))
+        self.hardware_summary_var.set(format_hardware_summary(self.hardware_info, language=self.language))
+        self.data_scale_var.set(format_data_scale(self.data_scale, language=self.language))
         self._update_worker_hint()
         self.dimension_var.set("auto")
         self.source_info.config(
-            text=(
-                f"格式: {meta.format_label}；维度: {meta.dimension}D；"
-                f"时间步: {len(meta.timesteps)}；层级: {meta.levels}；"
-                f"变量: {len(meta.variables)}"
+            text=self._(
+                "Format: {format}; dimension: {dimension}D; timesteps: {timesteps}; levels: {levels}; variables: {variables}",
+                format=meta.format_label,
+                dimension=meta.dimension,
+                timesteps=len(meta.timesteps),
+                levels=meta.levels,
+                variables=len(meta.variables),
             )
         )
         self._populate_variables()
@@ -882,11 +977,11 @@ class AMRVisualizerApp:
         if hasattr(self, "timestep_mode_var"):
             self._populate_timestep_controls()
         if hasattr(self, "data_scale_var"):
-            self.data_scale_var.set("Data: load a dataset to estimate scale")
+            self.data_scale_var.set(self._("Data: load a dataset to estimate scale"))
             self._update_worker_hint()
         for frame, text in (
-            (self.variable_frame, "请先加载受支持的数据目录"),
-            (self.level_frame, "请先加载受支持的数据目录"),
+            (self.variable_frame, self._("Load a supported dataset first")),
+            (self.level_frame, self._("Load a supported dataset first")),
         ):
             for child in frame.winfo_children():
                 child.destroy()
@@ -917,11 +1012,11 @@ class AMRVisualizerApp:
             self.var_checks[name] = flag
         button_row = len(variables) // 6 + 1
         ttk.Button(
-            self.variable_frame, text="全选",
+            self.variable_frame, text=self._("Select all"),
             command=lambda: [flag.set(True) for flag in self.var_checks.values()],
         ).grid(row=button_row, column=0, padx=8, pady=5)
         ttk.Button(
-            self.variable_frame, text="全不选",
+            self.variable_frame, text=self._("Select none"),
             command=lambda: [flag.set(False) for flag in self.var_checks.values()],
         ).grid(row=button_row, column=1, padx=8, pady=5)
 
@@ -936,11 +1031,11 @@ class AMRVisualizerApp:
             ).grid(row=0, column=index, sticky="w", padx=10)
             self.level_checks[level] = flag
         ttk.Button(
-            self.level_frame, text="全选",
+            self.level_frame, text=self._("Select all"),
             command=lambda: [flag.set(True) for flag in self.level_checks.values()],
         ).grid(row=1, column=0, padx=8, pady=5)
         ttk.Button(
-            self.level_frame, text="全不选",
+            self.level_frame, text=self._("Select none"),
             command=lambda: [flag.set(False) for flag in self.level_checks.values()],
         ).grid(row=1, column=1, padx=8, pady=5)
 
@@ -960,7 +1055,7 @@ class AMRVisualizerApp:
         if enabled:
             self._axis_changed()
         else:
-            self.slice_range_label.config(text="二维数据无需切片")
+            self.slice_range_label.config(text=self._("2D data does not require a slice"))
 
     def _update_spatial_range_controls(self):
         dimension = self._effective_dimension() if self.metadata else 0
@@ -986,7 +1081,7 @@ class AMRVisualizerApp:
             else:
                 low_var.set("")
                 high_var.set("")
-                self.spatial_range_labels[axis].config(text="二维数据无Z范围")
+                self.spatial_range_labels[axis].config(text=self._("2D data has no Z range"))
         self._update_spatial_range_controls()
 
     def _selected_axis_bounds(self, axis):
@@ -1006,7 +1101,7 @@ class AMRVisualizerApp:
         except DatasetError as exc:
             self.slice_range_label.config(text=str(exc))
             return
-        self.slice_range_label.config(text=f"范围: [{low:g}, {high:g}]")
+        self.slice_range_label.config(text=self._("Range: [{low:g}, {high:g}]", low=low, high=high))
         self.slice_position_var.set(f"{0.5 * (low + high):g}")
 
     def _toggle_range(self):
@@ -1015,7 +1110,7 @@ class AMRVisualizerApp:
         self.vmax_entry.config(state=state)
 
     def _select_output_dir(self):
-        folder = filedialog.askdirectory(title="选择输出目录")
+        folder = filedialog.askdirectory(title=self._("Select output directory"))
         if folder:
             self.output_dir_var.set(folder)
 
@@ -1030,8 +1125,8 @@ class AMRVisualizerApp:
 
     def _elapsed_text(self):
         if self._run_started_at is None:
-            return "用时 00:00"
-        return f"用时 {self._format_duration(time.perf_counter() - self._run_started_at)}"
+            return self._("Elapsed {duration}", duration="00:00")
+        return self._("Elapsed {duration}", duration=self._format_duration(time.perf_counter() - self._run_started_at))
 
     def _update_progress_status(self, percent):
         self.progress_var.set(percent)
@@ -1040,26 +1135,27 @@ class AMRVisualizerApp:
 
     def _build_config(self):
         if not self.metadata:
-            raise ValueError("请先选择数据目录")
+            raise ValueError(self._("Select a dataset first"))
         variables = [name for name, flag in self.var_checks.items() if flag.get()]
         if not variables:
-            raise ValueError("请至少选择一个绘图变量")
+            raise ValueError(self._("Select at least one variable"))
         levels = [level for level, flag in self.level_checks.items() if flag.get()]
         if not levels:
-            raise ValueError("请至少选择一个 AMR 层级")
+            raise ValueError(self._("Select at least one AMR level"))
         output_dir = self.output_dir_var.get().strip()
         if not output_dir:
-            raise ValueError("请选择输出目录")
+            raise ValueError(self._("Select an output directory"))
 
         config = PlotConfig()
         config.variables = variables
         config.selected_levels = levels
         config.dimension = self._effective_dimension()
         if config.dimension != self.metadata.dimension:
-            raise ValueError(
-                f"所选 {config.dimension}D 模式与数据实际维度 "
-                f"{self.metadata.dimension}D 不一致"
-            )
+            raise ValueError(self._(
+                "Selected {selected}D mode does not match the dataset dimension {actual}D",
+                selected=config.dimension,
+                actual=self.metadata.dimension,
+            ))
         config.slice_axis = self.slice_axis_var.get()
         domain_bounds = compute_bounds(self.metadata)
         axis_count = 3 if config.dimension == 3 else 2
@@ -1069,35 +1165,33 @@ class AMRVisualizerApp:
                 low = float(low_var.get())
                 high = float(high_var.get())
             except ValueError as exc:
-                raise ValueError(f"{axis.upper()}输出范围必须为数字") from exc
+                raise ValueError(self._("The {axis} output bounds must be numeric", axis=axis.upper())) from exc
             domain_low, domain_high = domain_bounds[index]
             if low >= high:
-                raise ValueError(
-                    f"{axis.upper()}输出范围最小值必须小于最大值"
-                )
+                raise ValueError(self._("The {axis} output minimum must be less than the maximum", axis=axis.upper()))
             tolerance = max(1.0, abs(domain_low), abs(domain_high)) * 1.0e-10
             if low < domain_low - tolerance or high > domain_high + tolerance:
-                raise ValueError(
-                    f"{axis.upper()}输出范围必须位于 "
-                    f"[{domain_low:g}, {domain_high:g}]"
-                )
+                raise ValueError(self._(
+                    "The {axis} output range must be inside [{low:g}, {high:g}]",
+                    axis=axis.upper(), low=domain_low, high=domain_high,
+                ))
             config.spatial_bounds[axis] = (low, high)
         if config.dimension == 3:
             try:
                 config.slice_position = float(self.slice_position_var.get())
             except ValueError as exc:
-                raise ValueError("三维切片坐标必须为数字") from exc
+                raise ValueError(self._("The 3D slice position must be numeric")) from exc
             low, high = config.spatial_bounds[config.slice_axis]
             if not low <= config.slice_position <= high:
-                raise ValueError(
-                    f"切片坐标必须位于所设 {config.slice_axis.upper()} "
-                    f"输出范围 [{low:g}, {high:g}]"
-                )
+                raise ValueError(self._(
+                    "The slice position must be inside the selected {axis} range [{low:g}, {high:g}]",
+                    axis=config.slice_axis.upper(), low=low, high=high,
+                ))
 
         mode_map = {
-            "云图": "contourf",
-            "等值线": "contour",
-            "云图 + 等值线": "both",
+            self._("Filled contour"): "contourf",
+            self._("Contour lines"): "contour",
+            self._("Filled contour + lines"): "both",
         }
         config.plot_mode = mode_map.get(self.plot_mode_var.get(), self.plot_mode_var.get())
         config.colormap = self.cmap_var.get()
@@ -1115,7 +1209,7 @@ class AMRVisualizerApp:
             float(self.fig_height_var.get()),
         )
         if config.figsize[0] <= 0 or config.figsize[1] <= 0:
-            raise ValueError("图片宽高必须为正数")
+            raise ValueError(self._("Figure width and height must be positive"))
         config.x_label = self.x_label_var.get().strip()
         config.y_label = self.y_label_var.get().strip()
         config.show_patch_edges = self.patch_edges_var.get()
@@ -1140,9 +1234,9 @@ class AMRVisualizerApp:
                 config.vmax = float(self.vmax_var.get())
         if config.norm_type == "log":
             if config.symmetric_color_range:
-                raise ValueError("log 色标不能同时使用正负对称色标")
+                raise ValueError(self._("Log color scale cannot use a symmetric color range"))
             if config.vmin is not None and config.vmin <= 0:
-                raise ValueError("log 色标的最小值必须大于 0")
+                raise ValueError(self._("The minimum value for a log color scale must be greater than zero"))
         config.output_type = self.output_type_var.get()
         config.image_format = self.image_format_var.get()
         config.resume = self.resume_var.get()
@@ -1153,7 +1247,7 @@ class AMRVisualizerApp:
         if self.video_gif_var.get():
             config.video_formats.append("gif")
         if config.output_type == "video" and not config.video_formats:
-            raise ValueError("请至少勾选一种视频格式（MP4 或 GIF/JIF）")
+            raise ValueError(self._("Select at least one video format (MP4 or GIF/JIF)"))
         config.video_format = config.video_formats[0] if config.video_formats else "mp4"
         config.output_dir = output_dir
         return config
@@ -1163,7 +1257,7 @@ class AMRVisualizerApp:
             config = self._build_config()
             selected_timesteps = self._selected_timesteps()
         except (ValueError, DatasetError) as exc:
-            messagebox.showwarning("参数错误", str(exc))
+            messagebox.showwarning(self._("Invalid settings"), str(exc))
             return
         os.makedirs(config.output_dir, exist_ok=True)
         self.run_button.config(state="disabled")
@@ -1171,7 +1265,7 @@ class AMRVisualizerApp:
         self._run_started_at = time.perf_counter()
         self.progress_var.set(0)
         self.status_label.config(text="0.0%")
-        self.elapsed_label.config(text="用时 00:00")
+        self.elapsed_label.config(text=self._("Elapsed {duration}", duration="00:00"))
 
         def progress(value):
             percent = max(0.0, min(100.0, value * 100))
@@ -1203,28 +1297,33 @@ class AMRVisualizerApp:
         self._run_active = False
         self.progress_var.set(100)
         elapsed_text = self._format_duration(elapsed)
-        self.status_label.config(text="完成")
-        self.elapsed_label.config(text=f"用时 {elapsed_text}")
+        self.status_label.config(text=self._("Completed"))
+        self.elapsed_label.config(text=self._("Elapsed {duration}", duration=elapsed_text))
         self._run_started_at = None
         if self.open_output_var.get() and os.path.isdir(output_dir):
-            os.startfile(output_dir)
+            try:
+                open_in_file_manager(output_dir)
+            except OSError:
+                pass
         messagebox.showinfo(
-            "完成",
-            f"已生成 {len(result)} 个变量的结果。\n"
-            f"完成用时: {elapsed_text}\n"
-            f"输出目录: {output_dir}",
+            self._("Completed"),
+            self._(
+                "Generated results for {count} variables.\nElapsed: {duration}\nOutput directory: {output}",
+                count=len(result), duration=elapsed_text, output=output_dir,
+            ),
         )
 
     def _failed(self, message, elapsed=0):
         self.run_button.config(state="normal")
         self._run_active = False
-        self.status_label.config(text="失败")
-        self.elapsed_label.config(text=f"用时 {self._format_duration(elapsed)}")
+        self.status_label.config(text=self._("Failed"))
+        self.elapsed_label.config(text=self._("Elapsed {duration}", duration=self._format_duration(elapsed)))
         self._run_started_at = None
-        messagebox.showerror("生成失败", message)
+        messagebox.showerror(self._("Generation failed"), message)
 
 
 def run_app():
+    configure_high_dpi()
     root = tk.Tk()
     AMRVisualizerApp(root)
     root.mainloop()

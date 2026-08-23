@@ -15,8 +15,20 @@ from amr_backend import (
 )
 from hardware_info import collect_hardware_info
 from gpu_backend import create_backend
+from i18n import get_language_preference, set_language, tr
+from platform_support import default_plot_font
 from runtime_policy import estimate_data_scale, recommend_workers
 from visualizer import PlotConfig, generate_all
+
+
+def _configure_console_encoding():
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (OSError, ValueError):
+                pass
 
 
 def _csv_values(value, cast=str):
@@ -51,75 +63,83 @@ def _parse_timesteps(spec, available):
 
 
 def print_metadata(metadata):
-    print(f"数据目录: {metadata.root}")
-    print(f"输入格式: {metadata.format_label}")
-    print(f"数据维度: {metadata.dimension}D")
-    print(f"时间步: {metadata.timesteps}")
-    print(f"AMR层级: {metadata.levels}")
-    print(f"变量: {', '.join(metadata.variables) if metadata.variables else '(未读取)'}")
+    print(tr("Dataset: {path}", path=metadata.root))
+    print(tr("Input format: {format}", format=metadata.format_label))
+    print(tr("Dimension: {dimension}D", dimension=metadata.dimension))
+    print(tr("Timesteps: {timesteps}", timesteps=metadata.timesteps))
+    print(tr("AMR levels: {levels}", levels=metadata.levels))
+    variables = ", ".join(metadata.variables) if metadata.variables else f"({tr('not read')})"
+    print(tr("Variables: {variables}", variables=variables))
     if metadata.bounds:
         labels = ("X", "Y", "Z")
-        print("坐标范围:")
+        print(tr("Coordinate bounds:"))
         for label, bounds in zip(labels, metadata.bounds):
             print(f"  {label}: [{bounds[0]:g}, {bounds[1]:g}]")
 
 
 def build_parser():
+    argparse._ = tr
     parser = argparse.ArgumentParser(
-        description="二维 AMR 云图与三维 X/Y/Z 平行切片批处理工具"
+        description=tr("2D AMR fields and parallel X/Y/Z slices for 3D data")
+    )
+    parser.add_argument(
+        "--language",
+        choices=["auto", "en", "zh_CN"],
+        default=get_language_preference(),
+        help=tr("Language: auto, en, or zh_CN"),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    inspect_parser = subparsers.add_parser("inspect", help="检查数据格式和元数据")
-    inspect_parser.add_argument("input", help="计算结果目录")
+    inspect_parser = subparsers.add_parser("inspect", help=tr("Inspect dataset format and metadata"))
+    inspect_parser.add_argument("input", help=tr("Dataset directory"))
 
-    render = subparsers.add_parser("render", help="批量生成图片或视频")
-    render.add_argument("input", help="计算结果目录")
-    render.add_argument("-o", "--output", required=True, help="输出目录")
+    render = subparsers.add_parser("render", help=tr("Render images or videos in batches"))
+    render.add_argument("input", help=tr("Dataset directory"))
+    render.add_argument("-o", "--output", required=True, help=tr("Output directory"))
     render.add_argument(
         "-v", "--variables", required=True,
-        help="变量列表，例如 rho,p,T",
+        help=tr("Comma-separated variables, for example rho,p,T"),
     )
     render.add_argument(
         "-l", "--levels", default="all",
-        help="层级列表，例如 0,1,2；默认 all",
+        help=tr("AMR levels, for example 0,1,2; default: all"),
     )
     render.add_argument(
         "-t", "--timesteps", default="all",
-        help="时间步，例如 0,500,1000-3000；默认 all",
+        help=tr("Timesteps, for example 0,500,1000-3000; default: all"),
     )
     render.add_argument(
         "--dimension", choices=["auto", "2", "3"], default="auto",
     )
     render.add_argument(
         "--slice-axis", choices=["x", "y", "z"], default="z",
-        help="三维切片法向",
+        help=tr("3D slice normal"),
     )
     render.add_argument(
         "--slice-position", type=float,
-        help="三维切片坐标；未给出时使用该方向中点",
+        help=tr("3D slice position; defaults to the midpoint"),
     )
     render.add_argument(
         "--x-range", nargs=2, type=float, metavar=("MIN", "MAX"),
-        help="X方向输出范围；默认完整边界",
+        help=tr("X output range; defaults to full bounds"),
     )
     render.add_argument(
         "--y-range", nargs=2, type=float, metavar=("MIN", "MAX"),
-        help="Y方向输出范围；默认完整边界",
+        help=tr("Y output range; defaults to full bounds"),
     )
     render.add_argument(
         "--z-range", nargs=2, type=float, metavar=("MIN", "MAX"),
-        help="Z方向输出范围；三维数据默认完整边界",
+        help=tr("Z output range; defaults to full bounds for 3D data"),
     )
     render.add_argument("--mode", choices=["contourf", "contour", "both"], default="contourf")
     render.add_argument("--cmap", default="redblue")
     render.add_argument("--vmin", type=float)
     render.add_argument("--vmax", type=float)
     render.add_argument("--norm", choices=["linear", "log"], default="linear")
-    render.add_argument("--symmetric-color", action="store_true", help="使用正负对称色标")
-    render.add_argument("--global-color", action="store_true", help="所有时间步使用统一色标")
+    render.add_argument("--symmetric-color", action="store_true", help=tr("Use a symmetric color range"))
+    render.add_argument("--global-color", action="store_true", help=tr("Use one color range for all timesteps"))
     render.add_argument("--dpi", type=int, default=600)
-    render.add_argument("--font-family", default="Times New Roman")
+    render.add_argument("--font-family", default=default_plot_font())
     render.add_argument("--font-size", type=int, default=12)
     render.add_argument("--figsize", nargs=2, type=float, metavar=("W", "H"), default=(12, 6))
     render.add_argument("--x-label", default="")
@@ -129,37 +149,47 @@ def build_parser():
     render.add_argument("--show-patch-edges", action="store_true")
     render.add_argument(
         "--workers", type=int, default=0,
-        help="并行进程数；0 表示根据硬件和数据规模自动选择",
+        help=tr("Worker processes; 0 selects automatically"),
     )
     render.add_argument("--image-format", default="png", choices=["png", "jpg", "tiff", "svg", "pdf"])
     render.add_argument("--output-type", default="image", choices=["image", "video"])
     render.add_argument("--fps", type=int, default=10)
     render.add_argument(
         "--no-resume", action="store_true",
-        help="不跳过已有结果，强制重新生成",
+        help=tr("Force regeneration instead of skipping existing output"),
     )
     render.add_argument(
         "--no-gpu", action="store_true",
-        help="禁用 GPU 数组加速，强制使用 NumPy/CPU",
+        help=tr("Disable GPU acceleration and force NumPy/CPU"),
     )
     render.add_argument(
         "--no-ascii-cache", action="store_true",
-        help="禁用 Tecplot ASCII 二进制缓存",
+        help=tr("Disable the Tecplot ASCII binary cache"),
     )
     render.add_argument(
         "--video-format",
         default="mp4",
         choices=["mp4", "gif", "jif", "both"],
-        help="视频格式；gif 与 jif 等价，both 表示同时生成 MP4 和 GIF",
+        help=tr("Video format; both writes MP4 and GIF"),
     )
     render.add_argument("--no-colorbar", action="store_true")
     render.add_argument("--no-frame", action="store_true")
-    render.add_argument("--no-title", action="store_true", help="隐藏图像顶部字段")
+    render.add_argument("--no-title", action="store_true", help=tr("Hide the title field above the plot"))
     return parser
 
 
 def main(argv=None):
+    _configure_console_encoding()
+    argv = list(sys.argv[1:] if argv is None else argv)
+    language = get_language_preference()
+    for index, value in enumerate(argv):
+        if value == "--language" and index + 1 < len(argv):
+            language = argv[index + 1]
+        elif value.startswith("--language="):
+            language = value.split("=", 1)[1]
+    set_language(language)
     args = build_parser().parse_args(argv)
+    set_language(args.language)
     try:
         metadata = scan_dataset(args.input)
         if args.command == "inspect":
@@ -169,20 +199,21 @@ def main(argv=None):
         variables = _csv_values(args.variables)
         unknown = [name for name in variables if name not in metadata.variables]
         if unknown:
-            raise DatasetError(f"数据中不存在变量: {', '.join(unknown)}")
+            raise DatasetError(tr("Dataset does not contain variables: {variables}", variables=", ".join(unknown)))
         levels = metadata.levels if args.levels == "all" else _csv_values(args.levels, int)
         invalid_levels = [level for level in levels if level not in metadata.levels]
         if invalid_levels:
-            raise DatasetError(f"数据中不存在层级: {invalid_levels}")
+            raise DatasetError(tr("Dataset does not contain levels: {levels}", levels=invalid_levels))
         timesteps = _parse_timesteps(args.timesteps, metadata.timesteps)
         if not timesteps:
-            raise DatasetError("没有选中有效时间步")
+            raise DatasetError(tr("No valid timesteps were selected"))
 
         dimension = metadata.dimension if args.dimension == "auto" else int(args.dimension)
         if dimension != metadata.dimension:
-            raise DatasetError(
-                f"所选 {dimension}D 模式与数据实际维度 {metadata.dimension}D 不一致"
-            )
+            raise DatasetError(tr(
+                "Selected {selected}D mode does not match the dataset dimension {actual}D",
+                selected=dimension, actual=metadata.dimension,
+            ))
         dataset_bounds = compute_bounds(metadata)
         requested_ranges = {
             "x": args.x_range,
@@ -196,18 +227,16 @@ def main(argv=None):
             values = requested_ranges[axis] or (domain_low, domain_high)
             low, high = float(values[0]), float(values[1])
             if low >= high:
-                raise DatasetError(
-                    f"{axis.upper()}输出范围最小值必须小于最大值"
-                )
+                raise DatasetError(tr("The {axis} output minimum must be less than the maximum", axis=axis.upper()))
             tolerance = max(1.0, abs(domain_low), abs(domain_high)) * 1.0e-10
             if low < domain_low - tolerance or high > domain_high + tolerance:
-                raise DatasetError(
-                    f"{axis.upper()}输出范围必须位于 "
-                    f"[{domain_low:g}, {domain_high:g}]"
-                )
+                raise DatasetError(tr(
+                    "The {axis} output range must be inside [{low:g}, {high:g}]",
+                    axis=axis.upper(), low=domain_low, high=domain_high,
+                ))
             spatial_bounds[axis] = (low, high)
         if dimension == 2 and args.z_range is not None:
-            raise DatasetError("二维数据不能设置Z输出范围")
+            raise DatasetError(tr("2D data cannot use a Z output range"))
 
         slice_position = args.slice_position
         if dimension == 3 and slice_position is None:
@@ -216,15 +245,15 @@ def main(argv=None):
         if dimension == 3:
             low, high = spatial_bounds[args.slice_axis]
             if not low <= slice_position <= high:
-                raise DatasetError(
-                    f"切片坐标必须位于所设 {args.slice_axis.upper()} "
-                    f"输出范围 [{low:g}, {high:g}]"
-                )
+                raise DatasetError(tr(
+                    "The slice position must be inside the selected {axis} range [{low:g}, {high:g}]",
+                    axis=args.slice_axis.upper(), low=low, high=high,
+                ))
         if args.norm == "log":
             if args.symmetric_color:
-                raise DatasetError("log 色标不能同时使用正负对称色标")
+                raise DatasetError(tr("Log color scale cannot use a symmetric color range"))
             if args.vmin is not None and args.vmin <= 0:
-                raise DatasetError("log 色标的最小值必须大于 0")
+                raise DatasetError(tr("The minimum value for a log color scale must be greater than zero"))
 
         hardware = collect_hardware_info(args.input)
         scale = estimate_data_scale(metadata, storage_kind=hardware.storage_kind)
@@ -235,12 +264,13 @@ def main(argv=None):
             requested=args.workers,
             use_gpu=not args.no_gpu,
         )
-        print(
-            f"调度: {worker_count} 个进程；"
-            f"数据约 {scale.total_bytes / (1024 * 1024):.1f} MB；"
-            f"GPU数组后端={array_backend.status.device if array_backend.status.is_gpu else 'CPU回退'}；"
-            f"ASCII缓存={'启用' if not args.no_ascii_cache else '关闭'}"
-        )
+        print(tr(
+            "Schedule: {workers} processes; data about {size:.1f} MB; GPU backend={backend}; ASCII cache={cache}",
+            workers=worker_count,
+            size=scale.total_bytes / (1024 * 1024),
+            backend=array_backend.status.device if array_backend.status.is_gpu else tr("CPU fallback"),
+            cache=tr("enabled") if not args.no_ascii_cache else tr("disabled"),
+        ))
 
         config = PlotConfig(
             variables=variables,
@@ -282,14 +312,14 @@ def main(argv=None):
         os.makedirs(config.output_dir, exist_ok=True)
 
         def progress(value):
-            print(f"\r进度: {value * 100:6.2f}%", end="", flush=True)
+            print("\r" + tr("Progress: {percent:6.2f}%", percent=value * 100), end="", flush=True)
 
         result = generate_all(metadata, timesteps, config, progress_callback=progress)
-        print("\n处理完成")
+        print("\n" + tr("Processing completed"))
         for variable, paths in result.items():
             if isinstance(paths, list):
                 count = sum(path is not None for path in paths)
-                print(f"  {variable}: {count} 个结果")
+                print("  " + tr("{variable}: {count} results", variable=variable, count=count))
             elif isinstance(paths, dict):
                 formatted = ", ".join(
                     f"{video_format}: {path}" for video_format, path in paths.items()
@@ -299,7 +329,7 @@ def main(argv=None):
                 print(f"  {variable}: {paths}")
         return 0
     except (DatasetError, UnsupportedFormatError, ValueError) as exc:
-        print(f"错误: {exc}", file=sys.stderr)
+        print(tr("Error: {message}", message=exc), file=sys.stderr)
         return 2
 
 

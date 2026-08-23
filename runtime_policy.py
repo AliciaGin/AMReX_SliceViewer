@@ -9,6 +9,7 @@ from typing import Iterable, List, Set
 
 from amr_backend import DatasetMetadata
 from hardware_info import HardwareInfo
+from i18n import tr_for
 
 
 @dataclass
@@ -124,18 +125,30 @@ def recommend_workers(
     return max(1, min(task_cap, cpu_cap, dimension_cap, storage_cap, _memory_worker_cap(hardware, scale)))
 
 
-def format_data_scale(scale: DataScale) -> str:
+def format_data_scale(scale: DataScale, language: str | None = None) -> str:
     size_mb = scale.total_bytes / (1024 * 1024) if scale.total_bytes else 0
     timestep_mb = (
         scale.estimated_timestep_bytes / (1024 * 1024)
         if scale.estimated_timestep_bytes else 0
     )
-    return (
-        f"Data: {scale.file_count} files, {size_mb:.1f} MB, "
-        f"{scale.timestep_count} timesteps, {scale.level_count} levels, "
-        f"{scale.variable_count} variables, {scale.dimension}D\n"
-        f"Estimated timestep: {timestep_mb:.1f} MB; storage: {scale.storage_kind}"
-    )
+    return "\n".join((
+        tr_for(
+            language,
+            "Data: {files} files, {size:.1f} MB, {timesteps} timesteps, {levels} levels, {variables} variables, {dimension}D",
+            files=scale.file_count,
+            size=size_mb,
+            timesteps=scale.timestep_count,
+            levels=scale.level_count,
+            variables=scale.variable_count,
+            dimension=scale.dimension,
+        ),
+        tr_for(
+            language,
+            "Estimated timestep: {size:.1f} MB; storage: {storage}",
+            size=timestep_mb,
+            storage=scale.storage_kind,
+        ),
+    ))
 
 
 __all__ = ["DataScale", "estimate_data_scale", "format_data_scale", "recommend_workers"]

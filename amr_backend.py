@@ -13,6 +13,8 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from i18n import tr
+
 
 DTYPE = np.float32
 ASCII_CACHE_VERSION = 1
@@ -134,7 +136,7 @@ def _find_plotfile_dirs(root: Path) -> List[Path]:
 def detect_dataset_format(path: str) -> str:
     root = Path(normalize_input_path(path)).resolve()
     if not root.exists():
-        raise DatasetError(f"数据路径不存在: {root}")
+        raise DatasetError(tr("Dataset path does not exist: {path}", path=root))
 
     if _find_plotfile_dirs(root):
         return "amrex_plotfile"
@@ -147,7 +149,7 @@ def detect_dataset_format(path: str) -> str:
                 return "tecplot_binary"
         except OSError:
             pass
-    raise DatasetError(f"未在目录中识别到 AMReX plotfile、.dat 或 .plt 数据: {root}")
+    raise DatasetError(tr("No AMReX plotfile, .dat, or .plt data was recognized in: {path}", path=root))
 
 
 def _parse_variables_line(line: str) -> List[str]:
@@ -185,7 +187,7 @@ def _scan_ascii(root: Path) -> DatasetMetadata:
         matched_files.append(path)
 
     if not matched_files:
-        raise DatasetError("未找到名称符合 plt_时间步_CPU_lev层级.dat 的文件")
+        raise DatasetError(tr("No files matching plt_<timestep>_<CPU>_lev<level>.dat were found"))
 
     for timestep_data in sources.values():
         for paths in timestep_data.values():
@@ -208,9 +210,9 @@ def _import_yt():
     try:
         import yt
     except ImportError as exc:
-        raise UnsupportedFormatError(
-            "读取 AMReX plotfile 需要 yt。请执行: python -m pip install yt"
-        ) from exc
+        raise UnsupportedFormatError(tr(
+            "Reading AMReX plotfiles requires yt. Run: python -m pip install yt"
+        )) from exc
     return yt
 
 
@@ -218,7 +220,7 @@ def _scan_plotfiles(root: Path) -> DatasetMetadata:
     yt = _import_yt()
     plot_dirs = _find_plotfile_dirs(root)
     if not plot_dirs:
-        raise DatasetError("未找到 AMReX plotfile 目录")
+        raise DatasetError(tr("No AMReX plotfile directory was found"))
 
     series = {
         (path.parent, _plotfile_name_parts(path)[0])
@@ -227,13 +229,13 @@ def _scan_plotfiles(root: Path) -> DatasetMetadata:
     }
     if len(series) > 1:
         names = "\n".join(
-            f"  - {parent / (prefix + '时间步数字')}"
+            f"  - {parent / (prefix + tr('timestep-number'))}"
             for parent, prefix in sorted(series, key=lambda item: (str(item[0]), item[1]))
         )
-        raise DatasetError(
-            "所选目录中包含多个 AMReX 输出名称系列，请选择其中一个系列的目录：\n"
-            f"{names}"
-        )
+        raise DatasetError(tr(
+            "The selected directory contains multiple AMReX output series. Select one series directory:\n{candidates}",
+            candidates=names,
+        ))
 
     plotfiles: Dict[int, str] = {}
     for path in plot_dirs:
@@ -242,13 +244,15 @@ def _scan_plotfiles(root: Path) -> DatasetMetadata:
             if len(plot_dirs) == 1:
                 timestep = 0
             else:
-                raise DatasetError(
-                    f"无法从目录名提取时间步，请使名称以数字结尾: {path.name}"
-                )
+                raise DatasetError(tr(
+                    "Could not extract a timestep from the directory name; make it end with digits: {name}",
+                    name=path.name,
+                ))
         if timestep in plotfiles:
-            raise DatasetError(
-                f"发现重复时间步 {timestep}: {plotfiles[timestep]} 和 {path}"
-            )
+            raise DatasetError(tr(
+                "Duplicate timestep {timestep}: {first} and {second}",
+                timestep=timestep, first=plotfiles[timestep], second=path,
+            ))
         plotfiles[timestep] = str(path)
     first = plot_dirs[0]
     ds = yt.load(str(first))
@@ -309,18 +313,18 @@ def _read_binary_header(path: Path) -> Tuple[List[str], int]:
 
     with path.open("rb") as handle:
         if handle.read(8) != b"#!TDV112":
-            raise DatasetError(f"不是 Tecplot TDV112 文件: {path}")
+            raise DatasetError(tr("Not a Tecplot TDV112 file: {path}", path=path))
 
         def read_int() -> int:
             raw = handle.read(4)
             if len(raw) != 4:
-                raise DatasetError(f"Tecplot 文件头不完整: {path}")
+                raise DatasetError(tr("Incomplete Tecplot header: {path}", path=path))
             return struct.unpack("<i", raw)[0]
 
         def read_double() -> float:
             raw = handle.read(8)
             if len(raw) != 8:
-                raise DatasetError(f"Tecplot 文件头不完整: {path}")
+                raise DatasetError(tr("Incomplete Tecplot header: {path}", path=path))
             return struct.unpack("<d", raw)[0]
 
         def read_string() -> str:
@@ -401,10 +405,10 @@ def _validate_single_dataset_root(root: Path, source_format: str) -> None:
     if len(containers) <= 1:
         return
     choices = "\n".join(f"  - {path}" for path in sorted(containers))
-    raise DatasetError(
-        "所选目录中包含多套独立计算结果，请选择其中一个具体结果目录：\n"
-        f"{choices}"
-    )
+    raise DatasetError(tr(
+        "The selected directory contains multiple independent results. Select one result directory:\n{candidates}",
+        candidates=choices,
+    ))
 
 
 def _parse_zone_header(line: str) -> Dict[str, object]:
@@ -450,7 +454,10 @@ def _read_float_block(handle, count: int) -> np.ndarray:
         return np.empty(0, dtype=DTYPE)
     values = np.fromstring(" ".join(chunks), sep=" ", dtype=DTYPE)
     if values.size < count:
-        raise DatasetError(f"数据块不完整: 需要 {count} 个值，实际 {values.size} 个")
+        raise DatasetError(tr(
+            "Incomplete data block: expected {expected} values, found {actual}",
+            expected=count, actual=values.size,
+        ))
     return values[:count]
 
 
@@ -644,7 +651,7 @@ def _read_ascii_file_linewise(
             if not lower.startswith("zone"):
                 continue
             if not variables:
-                raise DatasetError(f"ZONE 前未找到 VARIABLES: {filepath}")
+                raise DatasetError(tr("VARIABLES was not found before ZONE: {path}", path=filepath))
 
             header = _parse_zone_header(stripped)
             ni, nj, nk = int(header["i"]), int(header["j"]), int(header["k"])
@@ -778,10 +785,10 @@ def _read_ascii_file_zone_fast(
         )
 
         if values.size < total_count:
-            raise DatasetError(
-                f"数据块不完整: {filepath} Zone {index} 需要 "
-                f"{total_count} 个值，实际 {values.size} 个"
-            )
+            raise DatasetError(tr(
+                "Incomplete data block: {path} Zone {zone} expected {expected} values, found {actual}",
+                path=filepath, zone=index, expected=total_count, actual=values.size,
+            ))
 
         loaded: Dict[str, np.ndarray] = {}
         offset = 0
@@ -896,7 +903,7 @@ def _yt_field(ds, variable: str):
     for candidate in (("boxlib", variable), ("amrex", variable), ("gas", variable)):
         if candidate in ds.field_list or candidate in ds.derived_field_list:
             return candidate
-    raise DatasetError(f"AMReX plotfile 中不存在变量: {variable}")
+    raise DatasetError(tr("Variable does not exist in the AMReX plotfile: {variable}", variable=variable))
 
 
 def _load_plotfile(
@@ -959,10 +966,9 @@ def load_timestep(
     if metadata.source_format == "amrex_plotfile":
         return _load_plotfile(metadata, timestep, variables, selected_levels)
     if metadata.source_format == "tecplot_binary":
-        raise UnsupportedFormatError(
-            "当前软件不维护 Tecplot TDV112 二进制场数据读取；"
-            "请改用 plot_format=0 或 plot_format=1。"
-        )
+        raise UnsupportedFormatError(tr(
+            "Tecplot TDV112 binary field reading is not maintained. Use plot_format=0 or plot_format=1."
+        ))
 
     result: Dict[int, List[ZoneData]] = {}
     cache_dir = (
@@ -1015,7 +1021,7 @@ def extract_patch(
         )
 
     if slice_position is None:
-        raise DatasetError("三维数据必须指定切片坐标")
+        raise DatasetError(tr("A slice position is required for 3D data"))
     axis = slice_axis.lower()
     if axis == "z":
         if zone.z_edges is None:
@@ -1034,7 +1040,7 @@ def extract_patch(
         if index is None or zone.z_edges is None:
             return None
         return Patch2D(zone.level, zone.y_edges, zone.z_edges, values[:, :, index], "y", "z")
-    raise DatasetError(f"未知切片方向: {slice_axis}")
+    raise DatasetError(tr("Unknown slice axis: {axis}", axis=slice_axis))
 
 
 def build_patches(
@@ -1084,7 +1090,7 @@ def compute_bounds(metadata: DatasetMetadata) -> Tuple[Tuple[float, float], ...]
             if zone.z_edges is not None:
                 zs.extend((float(zone.z_edges[0]), float(zone.z_edges[-1])))
     if not xs or not ys:
-        raise DatasetError("无法计算数据坐标范围")
+        raise DatasetError(tr("Could not compute dataset coordinate bounds"))
     bounds: List[Tuple[float, float]] = [(min(xs), max(xs)), (min(ys), max(ys))]
     if metadata.dimension == 3:
         bounds.append((min(zs), max(zs)))
@@ -1096,5 +1102,8 @@ def axis_bounds(metadata: DatasetMetadata, axis: str) -> Tuple[float, float]:
     bounds = compute_bounds(metadata)
     index = {"x": 0, "y": 1, "z": 2}[axis.lower()]
     if index >= len(bounds):
-        raise DatasetError(f"{metadata.dimension}D 数据没有 {axis.upper()} 方向范围")
+        raise DatasetError(tr(
+            "{dimension}D data has no {axis} bounds",
+            dimension=metadata.dimension, axis=axis.upper(),
+        ))
     return bounds[index]

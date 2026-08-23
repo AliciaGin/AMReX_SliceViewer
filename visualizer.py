@@ -30,6 +30,8 @@ from amr_backend import (
     read_ascii_file,
 )
 from gpu_backend import ArrayBackend, create_backend
+from i18n import get_language, tr
+from platform_support import available_plot_fonts, default_plot_font, resolve_plot_font
 
 
 logger = logging.getLogger(__name__)
@@ -188,7 +190,7 @@ class PlotConfig:
     global_color_range: bool = False
     color_ranges: Dict[str, Tuple[float, float]] = field(default_factory=dict)
     dpi: int = 600
-    font_family: str = "Times New Roman"
+    font_family: str = field(default_factory=lambda: default_plot_font(get_language()))
     font_size: int = 12
     x_label: str = ""
     y_label: str = ""
@@ -480,11 +482,13 @@ def render_plot(
     if dimension == 3 and config.slice_position is not None:
         normal_bounds = config.spatial_bounds.get(config.slice_axis)
         if normal_bounds and not normal_bounds[0] <= config.slice_position <= normal_bounds[1]:
-            raise DatasetError(
-                f"切片坐标 {config.slice_position:g} 不在所设 "
-                f"{config.slice_axis.upper()} 范围 "
-                f"[{normal_bounds[0]:g}, {normal_bounds[1]:g}] 内"
-            )
+            raise DatasetError(tr(
+                "Slice position {position:g} is outside the selected {axis} range [{low:g}, {high:g}]",
+                position=config.slice_position,
+                axis=config.slice_axis.upper(),
+                low=normal_bounds[0],
+                high=normal_bounds[1],
+            ))
     patches = build_patches(
         level_data,
         var_name,
@@ -495,15 +499,21 @@ def render_plot(
     )
     patches = _crop_patches(patches, config)
     if not patches:
-        raise DatasetError("所选空间输出范围内没有可绘制数据")
+        raise DatasetError(tr("No drawable data exists inside the selected spatial bounds"))
 
     backend = _array_backend(config)
     vmin, vmax = _value_range(patches, config, var_name)
     norm = _normalizer(vmin, vmax, config)
     cmap = plt.get_cmap(config.colormap)
 
-    plt.rcParams["font.family"] = config.font_family
+    primary_font = resolve_plot_font(config.font_family, get_language())
+    font_fallbacks = [primary_font]
+    for family in available_plot_fonts("zh_CN"):
+        if family not in font_fallbacks:
+            font_fallbacks.append(family)
+    plt.rcParams["font.family"] = font_fallbacks
     plt.rcParams["font.size"] = config.font_size
+    plt.rcParams["axes.unicode_minus"] = False
     fig, ax = plt.subplots(figsize=config.figsize)
     mappable = None
     gpu_composite = None
@@ -766,7 +776,7 @@ def _compute_global_color_ranges(
                 _, timestep_ranges = future.result()
             except Exception as exc:
                 logger.exception("Color range failed: timestep=%s", timestep)
-                errors.append(f"时间步 {timestep}: {exc}")
+                errors.append(tr("Timestep {timestep}: {error}", timestep=timestep, error=exc))
             else:
                 for variable, (local_min, local_max) in timestep_ranges.items():
                     current_min, current_max = ranges[variable]
@@ -783,8 +793,8 @@ def _compute_global_color_ranges(
     if errors:
         details = "\n".join(errors[:5])
         if len(errors) > 5:
-            details += f"\n其余 {len(errors) - 5} 项错误已省略"
-        raise DatasetError(f"统一色标扫描失败:\n{details}")
+            details += "\n" + tr("{count} additional errors omitted", count=len(errors) - 5)
+        raise DatasetError(tr("Global color scan failed:\n{details}", details=details))
 
     final_ranges = {}
     for var_name, (min_value, max_value) in ranges.items():
@@ -860,18 +870,27 @@ def generate_images(
         for name in config.variables:
             path = timestep_result.get(name)
             if path and path.startswith("ERROR:"):
-                errors.append(f"时间步 {timestep}，变量 {name}: {path[6:].strip()}")
+                errors.append(tr(
+                    "Timestep {timestep}, variable {variable}: {error}",
+                    timestep=timestep, variable=name, error=path[6:].strip(),
+                ))
                 output[name].append(None)
             elif path:
                 output[name].append(path)
             else:
-                errors.append(f"时间步 {timestep}，变量 {name}: 未生成结果")
+                errors.append(tr(
+                    "Timestep {timestep}, variable {variable}: no result was generated",
+                    timestep=timestep, variable=name,
+                ))
                 output[name].append(None)
     if errors:
         details = "\n".join(errors[:5])
         if len(errors) > 5:
-            details += f"\n其余 {len(errors) - 5} 项错误已省略"
-        raise DatasetError(f"生成过程中有 {len(errors)} 项失败:\n{details}")
+            details += "\n" + tr("{count} additional errors omitted", count=len(errors) - 5)
+        raise DatasetError(tr(
+            "{count} items failed during generation:\n{details}",
+            count=len(errors), details=details,
+        ))
     return output
 
 
@@ -880,7 +899,7 @@ def _normalize_video_format(video_format: str) -> str:
     if value == "jif":
         value = "gif"
     if value not in {"mp4", "gif"}:
-        raise DatasetError(f"不支持的视频格式: {video_format}")
+        raise DatasetError(tr("Unsupported video format: {format}", format=video_format))
     return value
 
 
@@ -897,7 +916,7 @@ def _selected_video_formats(config: PlotConfig) -> List[str]:
         if value not in normalized:
             normalized.append(value)
     if not normalized:
-        raise DatasetError("请至少选择一种视频格式")
+        raise DatasetError(tr("Select at least one video format"))
     return normalized
 
 
@@ -912,7 +931,7 @@ def _with_video_extension(output_path: str, video_format: str) -> str:
 def _generate_mp4(image_paths, output_path, fps):
     first = cv2.imread(image_paths[0])
     if first is None:
-        raise DatasetError(f"无法读取首帧图片: {image_paths[0]}")
+        raise DatasetError(tr("Could not read the first frame: {path}", path=image_paths[0]))
     height, width = first.shape[:2]
     writer = cv2.VideoWriter(
         output_path,
@@ -921,7 +940,7 @@ def _generate_mp4(image_paths, output_path, fps):
         (width, height),
     )
     if not writer.isOpened():
-        raise DatasetError("MP4 视频写入器打开失败，请检查 opencv-python 安装和本机编码器支持")
+        raise DatasetError(tr("Could not open the MP4 writer. Check opencv-python and the local codecs."))
 
     written = 0
     for path in image_paths:
@@ -934,14 +953,14 @@ def _generate_mp4(image_paths, output_path, fps):
         written += 1
     writer.release()
     if written == 0 or not os.path.isfile(output_path) or os.path.getsize(output_path) == 0:
-        raise DatasetError("MP4 视频写入失败，没有生成有效文件")
+        raise DatasetError(tr("MP4 generation failed because no valid output was written"))
 
 
 def _generate_gif(image_paths, output_path, fps):
     try:
         from PIL import Image
     except ImportError as exc:
-        raise DatasetError("生成 GIF/JIF 需要安装 Pillow，请先运行: pip install Pillow") from exc
+        raise DatasetError(tr("GIF/JIF generation requires Pillow. Run: pip install Pillow")) from exc
 
     frames = []
     base_size = None
@@ -956,7 +975,7 @@ def _generate_gif(image_paths, output_path, fps):
             image = image.resize(base_size)
         frames.append(image)
     if not frames:
-        raise DatasetError("GIF/JIF 生成失败，没有可用帧")
+        raise DatasetError(tr("GIF/JIF generation failed because no usable frames were found"))
 
     duration_ms = max(1, int(round(1000 / max(1, fps))))
     frames[0].save(
@@ -968,14 +987,14 @@ def _generate_gif(image_paths, output_path, fps):
         optimize=False,
     )
     if not os.path.isfile(output_path) or os.path.getsize(output_path) == 0:
-        raise DatasetError("GIF/JIF 写入失败，没有生成有效文件")
+        raise DatasetError(tr("GIF/JIF generation failed because no valid output was written"))
 
 
 def generate_video(image_paths, output_path, fps=10, video_format="mp4"):
     video_format = _normalize_video_format(video_format)
     existing = [path for path in image_paths if path and os.path.isfile(path)]
     if not existing:
-        raise DatasetError("没有可用于生成视频的图片帧")
+        raise DatasetError(tr("No image frames are available for video generation"))
     output_path = _with_video_extension(output_path, video_format)
     if video_format == "mp4":
         _generate_mp4(existing, output_path, fps)

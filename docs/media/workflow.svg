@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="520" viewBox="0 0 1200 520" role="img" aria-labelledby="title desc">
+  <title id="title">AMReX SliceViewer workflow</title>
+  <desc id="desc">Input AMReX or Tecplot data is inspected, rendered, and exported as images or animations.</desc>
+  <rect width="1200" height="520" fill="#f8fafc"/>
+  <rect x="32" y="28" width="1136" height="464" rx="18" fill="#ffffff" stroke="#dbe3ec" stroke-width="2"/>
+  <text x="70" y="78" font-family="Arial, sans-serif" font-size="28" font-weight="700" fill="#12263a">From simulation data to publication-ready media</text>
+  <text x="70" y="108" font-family="Arial, sans-serif" font-size="16" fill="#526579">Inspect, configure, render, and share AMR results through one reproducible workflow.</text>
+
+  <rect x="70" y="158" width="230" height="230" rx="12" fill="#eaf3ff" stroke="#8db9ef" stroke-width="2"/>
+  <circle cx="185" cy="210" r="30" fill="#2775c9"/>
+  <text x="185" y="219" text-anchor="middle" font-family="Arial, sans-serif" font-size="25" font-weight="700" fill="#ffffff">1</text>
+  <text x="185" y="270" text-anchor="middle" font-family="Arial, sans-serif" font-size="21" font-weight="700" fill="#163b63">Input data</text>
+  <text x="185" y="304" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" fill="#385977">AMReX plotfiles</text>
+  <text x="185" y="329" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" fill="#385977">Tecplot ASCII .dat</text>
+  <text x="185" y="354" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" fill="#385977">Time steps and AMR levels</text>
+
+  <rect x="350" y="158" width="230" height="230" rx="12" fill="#edf9f4" stroke="#88d2b0" stroke-width="2"/>
+  <circle cx="465" cy="210" r="30" fill="#16845a"/>
+  <text x="465" y="219" text-anchor="middle" font-family="Arial, sans-serif" font-size="25" font-weight="700" fill="#ffffff">2</text>
+  <text x="465" y="270" text-anchor="middle" font-family="Arial, sans-serif" font-size="21" font-weight="700" fill="#14553d">Inspect</text>
+  <text x="465" y="304" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" fill="#356c58">Detect format and dimension</text>
+  <text x="465" y="329" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" fill="#356c58">List variables and levels</text>
+  <text x="465" y="354" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" fill="#356c58">Check coordinate bounds</text>
+
+  <rect x="630" y="158" width="230" height="230" rx="12" fill="#fff6e8" stroke="#e8bd72" stroke-width="2"/>
+  <circle cx="745" cy="210" r="30" fill="#c77a13"/>
+  <text x="745" y="219" text-anchor="middle" font-family="Arial, sans-serif" font-size="25" font-weight="700" fill="#ffffff">3</text>
+  <text x="745" y="270" text-anchor="middle" font-family="Arial, sans-serif" font-size="21" font-weight="700" fill="#74470c">Configure</text>
+  <text x="745" y="304" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" fill="#775b32">Field, levels, and time range</text>
+  <text x="745" y="329" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" fill="#775b32">Slice, colormap, and limits</text>
+  <text x="745" y="354" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" fill="#775b32">CPU or optional GPU backend</text>
+
+  <rect x="910" y="158" width="230" height="230" rx="12" fill="#f4efff" stroke="#b8a0e8" stroke-width="2"/>
+  <circle cx="1025" cy="210" r="30" fill="#7650b8"/>
+  <text x="1025" y="219" text-anchor="middle" font-family="Arial, sans-serif" font-size="25" font-weight="700" fill="#ffffff">4</text>
+  <text x="1025" y="270" text-anchor="middle" font-family="Arial, sans-serif" font-size="21" font-weight="700" fill="#4f347d">Export</text>
+  <text x="1025" y="304" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" fill="#5d4c78">PNG, JPG, SVG, or PDF</text>
+  <text x="1025" y="329" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" fill="#5d4c78">MP4 and GIF animations</text>
+  <text x="1025" y="354" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" fill="#5d4c78">README-ready media</text>
+
+  <path d="M300 273 H350" stroke="#7890a8" stroke-width="3" fill="none"/>
+  <path d="M580 273 H630" stroke="#7890a8" stroke-width="3" fill="none"/>
+  <path d="M860 273 H910" stroke="#7890a8" stroke-width="3" fill="none"/>
+  <path d="M340 265 l12 8 -12 8" fill="#7890a8"/>
+  <path d="M620 265 l12 8 -12 8" fill="#7890a8"/>
+  <path d="M900 265 l12 8 -12 8" fill="#7890a8"/>
+
+  <text x="600" y="442" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="#526579">GUI for exploration  |  CLI for repeatable batch processing  |  CPU fallback when GPU is unavailable</text>
+</svg>

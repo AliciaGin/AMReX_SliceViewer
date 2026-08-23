@@ -11,6 +11,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from i18n import tr, tr_for
+
 try:
     import psutil
 except ImportError:  # Optional fallback for a minimal installation.
@@ -172,7 +174,7 @@ def collect_hardware_info(data_path: str = "") -> HardwareInfo:
         except (TypeError, ValueError):
             pass
     else:
-        info.notes = "未检测到可用 NVIDIA GPU；GPU 绘图后端将回退 CPU。"
+        info.notes = tr("No usable NVIDIA GPU was detected; the renderer will use the CPU fallback.")
 
     if data_path:
         try:
@@ -183,31 +185,39 @@ def collect_hardware_info(data_path: str = "") -> HardwareInfo:
             info.storage_free_bytes = int(usage.free)
             info.__dict__.update(_windows_storage_info(resolved))
         except OSError as exc:
-            info.notes = f"磁盘信息读取失败: {exc}"
+            info.notes = tr("Could not read disk information: {error}", error=exc)
     return info
 
 
-def format_hardware_summary(info: HardwareInfo) -> str:
+def format_hardware_summary(info: HardwareInfo, language: str | None = None) -> str:
     cpu_frequency = (
         f"{info.cpu_frequency_mhz:.0f} MHz"
         if info.cpu_frequency_mhz else "unknown"
     )
     gpu_memory = _format_bytes(info.gpu_memory_bytes)
-    memory = (
-        f"{_format_bytes(info.available_memory_bytes)} available / "
-        f"{_format_bytes(info.total_memory_bytes)} total"
-    )
-    disk = (
-        f"{info.storage_kind}, {_format_bytes(info.storage_free_bytes)} free / "
-        f"{_format_bytes(info.storage_total_bytes)} total"
-    )
     return "\n".join(
         (
             f"CPU: {info.cpu_model} ({info.physical_cores}C/{info.logical_cores}T, {cpu_frequency})",
-            f"Memory: {memory}",
+            tr_for(
+                language,
+                "Memory: {available} available / {total} total",
+                available=_format_bytes(info.available_memory_bytes),
+                total=_format_bytes(info.total_memory_bytes),
+            ),
             f"GPU: {info.gpu_name} ({gpu_memory}, driver {info.gpu_driver})",
-            f"Disk: {info.storage_device} ({disk})",
-            f"GPU backend: {'detected; array acceleration selectable' if info.gpu_available else 'CPU fallback'}",
+            tr_for(
+                language,
+                "Disk: {device} ({kind}, {free} free / {total} total)",
+                device=info.storage_device,
+                kind=info.storage_kind,
+                free=_format_bytes(info.storage_free_bytes),
+                total=_format_bytes(info.storage_total_bytes),
+            ),
+            tr_for(
+                language,
+                "GPU backend: detected; array acceleration selectable"
+                if info.gpu_available else "GPU backend: CPU fallback",
+            ),
         )
     )
 
